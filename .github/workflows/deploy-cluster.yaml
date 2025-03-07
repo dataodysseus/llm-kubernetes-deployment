@@ -45,3 +45,9 @@ jobs:
 
           # Get cluster credentials
           gcloud container clusters get-credentials llm-deploy --region=${REGION}
+
+      - name: Install gke-gcloud-auth-plugin
+        run: |
+          gcloud components install gke-gcloud-auth-plugin
+          export USE_GKE_GCLOUD_AUTH_PLUGIN=True
+
