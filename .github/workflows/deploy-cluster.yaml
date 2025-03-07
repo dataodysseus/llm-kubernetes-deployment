@@ -1,0 +1,47 @@
+name: Deploy GKE Cluster (Manual)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'  # Required for Workload Identity Federation
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Authenticate with Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: "genai-model-dev-deploy"
+          workload_identity_provider: "projects/630538663455/locations/global/workloadIdentityPools/github/providers/llm-kubernetes-deployment"
+          service_account: "llm-model-serving-2025@genai-model-dev-deploy.iam.gserviceaccount.com"
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: "genai-model-dev-deploy"
+
+      - name: Enable Required Services
+        run: |
+          gcloud services enable container.googleapis.com
+
+      - name: Create GKE Cluster
+        run: |
+          #!/bin/bash
+          gcloud config set project genai-model-dev-deploy
+
+          export REGION=us-east4
+
+          gcloud container clusters create llm-deploy --location ${REGION} \
+            --workload-pool genai-model-dev-deploy.svc.id.goog \
+            --enable-image-streaming --node-locations=${REGION}-a \
+            --machine-type n2d-standard-4 --num-nodes 1 \
+            --release-channel=rapid
+
+          # Get cluster credentials
+          gcloud container clusters get-credentials llm-deploy --region=${REGION}
