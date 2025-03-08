@@ -35,7 +35,7 @@ iface = gr.Interface(
     inputs=gr.Textbox(lines=2, placeholder="Enter your question here..."),
     outputs="text",
     title="Chatbot",
-    description="Ask me anything!"
+    description="Ask me anything! "
 )
 
 # Launch the app
