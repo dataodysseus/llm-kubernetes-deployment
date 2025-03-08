@@ -48,6 +48,11 @@ jobs:
         run: |
           gcloud container clusters get-credentials llm-deploy --region us-east4 --project genai-model-dev-deploy
 
+      - name: Install gke-gcloud-auth-plugin
+        run: |
+          gcloud components install gke-gcloud-auth-plugin
+          export USE_GKE_GCLOUD_AUTH_PLUGIN=True
+
       - name: Create Kubernetes Secret for Hugging Face Token
         run: |
           kubectl create secret generic hf-secret \
