@@ -48,7 +48,7 @@ jobs:
         run: |
           gcloud container clusters get-credentials llm-deploy --region us-east4 --project genai-model-dev-deploy
 
-      # - name: Deploy Image to GKE
-      #   run: |
-      #     cd TinyLlama-1.1B-Chat-v1.0/llm-gke-model-serving
-      #     kubectl apply -f llm-deployment.yaml
+      - name: Deploy Image to GKE
+        run: |
+          cd TinyLlama-1.1B-Chat-v1.0/llm-gke-model-serving
+          kubectl apply -f llm-deployment.yaml
