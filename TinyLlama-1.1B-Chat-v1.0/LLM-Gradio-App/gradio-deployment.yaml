@@ -1,0 +1,19 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gradio
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gradio
+  template:
+    metadata:
+      labels:
+        app: gradio
+    spec:
+      containers:
+      - name: gradio
+        image: us-east4-docker.pkg.dev/genai-model-dev-deploy/gen-ai-app-registry/gradio-app:latest
+        ports:
+        - containerPort: 7860
