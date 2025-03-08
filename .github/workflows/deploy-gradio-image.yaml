@@ -36,11 +36,11 @@ jobs:
 
       - name: Set Working Directory
         run: |
-          cd TinyLlama-1.1B-Chat-v1.0/llm-gradio-app
+          cd TinyLlama-1.1B-Chat-v1.0/LLM-Gradio-App
 
       - name: Create and Push Docker Image
         run: |
-          cd TinyLlama-1.1B-Chat-v1.0/llm-gradio-app
+          cd TinyLlama-1.1B-Chat-v1.0/LLM-Gradio-App
           docker build -t us-east4-docker.pkg.dev/genai-model-dev-deploy/gen-ai-app-registry/gradio-app:latest .
           docker push us-east4-docker.pkg.dev/genai-model-dev-deploy/gen-ai-app-registry/gradio-app:latest
 
@@ -61,5 +61,5 @@ jobs:
 
       - name: Deploy Image to GKE
         run: |
-          cd TinyLlama-1.1B-Chat-v1.0/llm-gradio-app
+          cd TinyLlama-1.1B-Chat-v1.0/LLM-Gradio-App
           kubectl apply -f gradio-deployment.yaml
