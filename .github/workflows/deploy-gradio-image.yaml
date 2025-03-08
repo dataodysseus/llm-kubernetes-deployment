@@ -1,0 +1,65 @@
+name: Deploy Gradio Image (Manual)
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'  # Required for Workload Identity Federation
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Authenticate with Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: "genai-model-dev-deploy"
+          workload_identity_provider: "projects/630538663455/locations/global/workloadIdentityPools/github/providers/llm-kubernetes-deployment"
+          service_account: "llm-model-serving-2025@genai-model-dev-deploy.iam.gserviceaccount.com"
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: "genai-model-dev-deploy"
+
+      - name: Enable Required Services
+        run: |
+          gcloud services enable container.googleapis.com artifactregistry.googleapis.com
+
+      - name: Configure Docker to Authenticate with Google Artifact Registry
+        run: |
+          gcloud auth configure-docker us-east4-docker.pkg.dev
+
+      - name: Set Working Directory
+        run: |
+          cd TinyLlama-1.1B-Chat-v1.0/llm-gradio-app
+
+      - name: Create and Push Docker Image
+        run: |
+          cd TinyLlama-1.1B-Chat-v1.0/llm-gradio-app
+          docker build -t us-east4-docker.pkg.dev/genai-model-dev-deploy/gen-ai-app-registry/gradio-app:latest .
+          docker push us-east4-docker.pkg.dev/genai-model-dev-deploy/gen-ai-app-registry/gradio-app:latest
+
+      - name: Get GKE Credentials
+        run: |
+          gcloud container clusters get-credentials llm-deploy --region us-east4 --project genai-model-dev-deploy
+
+      - name: Install gke-gcloud-auth-plugin
+        run: |
+          gcloud components install gke-gcloud-auth-plugin
+          export USE_GKE_GCLOUD_AUTH_PLUGIN=True
+
+      - name: Create Kubernetes Secret for Hugging Face Token
+        run: |
+          kubectl create secret generic hf-secret \
+            --from-literal=HUGGING_FACE_TOKEN=${{ secrets.HUGGING_FACE_TOKEN }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy Image to GKE
+        run: |
+          cd TinyLlama-1.1B-Chat-v1.0/llm-gradio-app
+          kubectl apply -f gradio-deployment.yaml
