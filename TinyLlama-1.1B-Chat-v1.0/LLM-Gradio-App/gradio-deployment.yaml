@@ -17,3 +17,15 @@ spec:
         image: us-east4-docker.pkg.dev/genai-model-dev-deploy/gen-ai-app-registry/gradio-app:latest
         ports:
         - containerPort: 7860
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gradio-service
+spec:
+  type: LoadBalancer
+  selector:
+    app: gradio
+  ports:
+  - port: 80
+    targetPort: 7860
