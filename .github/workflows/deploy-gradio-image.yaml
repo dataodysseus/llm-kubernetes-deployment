@@ -32,7 +32,8 @@ jobs:
 
       - name: Configure Docker to Authenticate with Google Artifact Registry
         run: |
-          gcloud auth configure-docker us-east4-docker.pkg.dev
+          export REGION=${{ secrets.GCP_REGION }}
+          gcloud auth configure-docker $REGION-docker.pkg.dev
 
       - name: Set Working Directory
         run: |
@@ -49,7 +50,7 @@ jobs:
 
       - name: Get GKE Credentials
         run: |
-          gcloud container clusters get-credentials llm-deploy --region us-east4 --project ${{ secrets.PROJECT_ID }}
+          gcloud container clusters get-credentials llm-deploy --region ${{ secrets.GCP_REGION }} --project ${{ secrets.PROJECT_ID }}
 
       - name: Install gke-gcloud-auth-plugin
         run: |

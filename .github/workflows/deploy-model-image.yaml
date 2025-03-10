@@ -17,14 +17,14 @@ jobs:
       - name: Authenticate with Workload Identity Federation
         uses: google-github-actions/auth@v2
         with:
-          project_id: "${{ secrets.PROJECT_ID }}"
-          workload_identity_provider: "${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}"
-          service_account: "${{ secrets.SERVICE_ACCOUNT }}"
+          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+          workload_identity_provider: "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}"
+          service_account: "${{ secrets.GCP_SERVICE_ACCOUNT }}"
 
       - name: Set up Google Cloud SDK
         uses: google-github-actions/setup-gcloud@v1
         with:
-          project_id: "${{ secrets.PROJECT_ID }}"
+          project_id: "${{ secrets.GCP_PROJECT_ID }}"
 
       - name: Enable Required Services
         run: |
@@ -32,7 +32,8 @@ jobs:
 
       - name: Configure Docker to Authenticate with Google Artifact Registry
         run: |
-          gcloud auth configure-docker us-east4-docker.pkg.dev
+          export REGION=${{ secrets.GCP_REGION }}
+          gcloud auth configure-docker $REGION-docker.pkg.dev
 
       - name: Set Working Directory
         run: |
@@ -40,8 +41,8 @@ jobs:
 
       - name: Create and Push Docker Image
         run: |
-          export PROJECT_ID=${{ secrets.PROJECT_ID }}
-          export ARTIFACT_REGISTRY=${{ secrets.ARTIFACT_REGISTRY }}
+          export PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
+          export ARTIFACT_REGISTRY=${{ secrets.GCP_ARTIFACT_REGISTRY }}
           export REGION=${{ secrets.GCP_REGION }}
 
           cd TinyLlama-1.1B-Chat-v1.0/llm-gke-model-serving
@@ -50,7 +51,7 @@ jobs:
 
       - name: Get GKE Credentials
         run: |
-          gcloud container clusters get-credentials llm-deploy --region us-east4 --project ${{ secrets.PROJECT_ID }}
+          gcloud container clusters get-credentials llm-deploy --region ${{ secrets.GCP_REGION }} --project ${{ secrets.GCP_PROJECT_ID }}
 
       - name: Install gke-gcloud-auth-plugin
         run: |
