@@ -17,14 +17,14 @@ jobs:
       - name: Authenticate with Workload Identity Federation
         uses: google-github-actions/auth@v2
         with:
-          project_id: "genai-model-dev-deploy"
-          workload_identity_provider: "projects/630538663455/locations/global/workloadIdentityPools/github/providers/llm-kubernetes-deployment"
-          service_account: "llm-model-serving-2025@genai-model-dev-deploy.iam.gserviceaccount.com"
+          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+          workload_identity_provider: "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}"
+          service_account: "${{ secrets.GCP_SERVICE_ACCOUNT }}"
 
       - name: Set up Google Cloud SDK
         uses: google-github-actions/setup-gcloud@v1
         with:
-          project_id: "genai-model-dev-deploy"
+          project_id: "${{ secrets.GCP_PROJECT_ID }}"
 
       - name: Enable Required Services
         run: |
@@ -33,18 +33,16 @@ jobs:
       - name: Create GKE Cluster
         run: |
           #!/bin/bash
-          gcloud config set project genai-model-dev-deploy
+          gcloud config set project ${{ secrets.GCP_PROJECT_ID }}
 
-          export REGION=us-east4
-
-          gcloud container clusters create llm-deploy --location ${REGION} \
-            --workload-pool genai-model-dev-deploy.svc.id.goog \
-            --enable-image-streaming --node-locations=${REGION}-a \
+          gcloud container clusters create llm-deploy --location ${{ secrets.GCP_REGION }} \
+            --workload-pool ${{ secrets.PROJECT_ID }}.svc.id.goog \
+            --enable-image-streaming --node-locations=${{ secrets.GCP_REGION }}-a \
             --machine-type n2d-standard-4 --num-nodes 1 \
             --release-channel=rapid
 
           # Get cluster credentials
-          gcloud container clusters get-credentials llm-deploy --region=${REGION}
+          gcloud container clusters get-credentials llm-deploy --region=$${{ secrets.GCP_REGION }}
 
       - name: Install gke-gcloud-auth-plugin
         run: |

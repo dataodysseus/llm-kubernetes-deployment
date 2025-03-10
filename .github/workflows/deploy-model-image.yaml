@@ -17,14 +17,14 @@ jobs:
       - name: Authenticate with Workload Identity Federation
         uses: google-github-actions/auth@v2
         with:
-          project_id: "genai-model-dev-deploy"
-          workload_identity_provider: "projects/630538663455/locations/global/workloadIdentityPools/github/providers/llm-kubernetes-deployment"
-          service_account: "llm-model-serving-2025@genai-model-dev-deploy.iam.gserviceaccount.com"
+          project_id: "${{ secrets.PROJECT_ID }}"
+          workload_identity_provider: "${{ secrets.WORKLOAD_IDENTITY_PROVIDER }}"
+          service_account: "${{ secrets.SERVICE_ACCOUNT }}"
 
       - name: Set up Google Cloud SDK
         uses: google-github-actions/setup-gcloud@v1
         with:
-          project_id: "genai-model-dev-deploy"
+          project_id: "${{ secrets.PROJECT_ID }}"
 
       - name: Enable Required Services
         run: |
@@ -40,13 +40,17 @@ jobs:
 
       - name: Create and Push Docker Image
         run: |
+          export PROJECT_ID=${{ secrets.PROJECT_ID }}
+          export ARTIFACT_REGISTRY=${{ secrets.ARTIFACT_REGISTRY }}
+          export REGION=${{ secrets.GCP_REGION }}
+
           cd TinyLlama-1.1B-Chat-v1.0/llm-gke-model-serving
-          docker build -t us-east4-docker.pkg.dev/genai-model-dev-deploy/gen-ai-app-registry/tinyllama-cpu-inference:latest .
-          docker push us-east4-docker.pkg.dev/genai-model-dev-deploy/gen-ai-app-registry/tinyllama-cpu-inference:latest
+          docker build -t $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY/tinyllama-cpu-inference:latest .
+          docker push $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY/tinyllama-cpu-inference:latest
 
       - name: Get GKE Credentials
         run: |
-          gcloud container clusters get-credentials llm-deploy --region us-east4 --project genai-model-dev-deploy
+          gcloud container clusters get-credentials llm-deploy --region us-east4 --project ${{ secrets.PROJECT_ID }}
 
       - name: Install gke-gcloud-auth-plugin
         run: |
@@ -58,6 +62,16 @@ jobs:
           kubectl create secret generic hf-secret \
             --from-literal=HUGGING_FACE_TOKEN=${{ secrets.HUGGING_FACE_TOKEN }} \
             --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Prepare Kubernetes Deployment Manifest
+        run: |
+          export PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
+          export ARTIFACT_REGISTRY=${{ secrets.GCP_ARTIFACT_REGISTRY }}
+          export REGION=${{ secrets.GCP_REGION }}
+
+          sed -i "s|{{PROJECT_ID}}|$PROJECT_ID|g" llm-deployment.yaml
+          sed -i "s|{{ARTIFACT_REGISTRY}}|$ARTIFACT_REGISTRY|g" llm-deployment.yaml
+          sed -i "s|{{REGION}}|$REGION|g" llm-deployment.yaml
 
       - name: Deploy Image to GKE
         run: |

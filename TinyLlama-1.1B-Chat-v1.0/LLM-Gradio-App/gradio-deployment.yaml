@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: gradio
-        image: us-east4-docker.pkg.dev/genai-model-dev-deploy/gen-ai-app-registry/gradio-app:latest
+        image: {{REGION}}-docker.pkg.dev/{{PROJECT_ID}}/{{ARTIFACT_REGISTRY}}/gradio-app:latest
         ports:
         - containerPort: 7860
 ---
