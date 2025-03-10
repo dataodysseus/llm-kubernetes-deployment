@@ -42,7 +42,7 @@ jobs:
             --release-channel=rapid
 
           # Get cluster credentials
-          gcloud container clusters get-credentials llm-deploy --region=$${{ secrets.GCP_REGION }}
+          gcloud container clusters get-credentials llm-deploy --region=$${{ secrets.GCP_REGION }}-a
 
       - name: Install gke-gcloud-auth-plugin
         run: |
