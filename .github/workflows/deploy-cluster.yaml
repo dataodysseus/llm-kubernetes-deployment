@@ -37,7 +37,7 @@ jobs:
 
           gcloud container clusters create llm-deploy --location ${{ secrets.GCP_REGION }} \
             --workload-pool ${{ secrets.GCP_PROJECT_ID }}.svc.id.goog \
-            --enable-image-streaming --node-locations=${{ secrets.GCP_REGION }} \
+            --enable-image-streaming --node-locations=${{ secrets.GCP_REGION }}-a \
             --machine-type n2d-standard-4 --num-nodes 1 \
             --release-channel=rapid
 
