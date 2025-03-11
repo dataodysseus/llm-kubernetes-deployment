@@ -37,12 +37,12 @@ jobs:
 
           gcloud container clusters create llm-deploy --location ${{ secrets.GCP_REGION }} \
             --workload-pool ${{ secrets.GCP_PROJECT_ID }}.svc.id.goog \
-            --enable-image-streaming --node-locations=${{ secrets.GCP_REGION }}-a \
+            --enable-image-streaming --node-locations=${{ secrets.GCP_REGION }} \
             --machine-type n2d-standard-4 --num-nodes 1 \
             --release-channel=rapid
 
           # Get cluster credentials
-          gcloud container clusters get-credentials llm-deploy --region=$${{ secrets.GCP_REGION }}-a
+          gcloud container clusters get-credentials llm-deploy --region=$${{ secrets.GCP_REGION }}
 
       - name: Install gke-gcloud-auth-plugin
         run: |
