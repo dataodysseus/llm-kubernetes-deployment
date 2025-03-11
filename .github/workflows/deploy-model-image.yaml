@@ -70,6 +70,7 @@ jobs:
           export ARTIFACT_REGISTRY=${{ secrets.GCP_ARTIFACT_REGISTRY }}
           export REGION=${{ secrets.GCP_REGION }}
 
+          cd TinyLlama-1.1B-Chat-v1.0/llm-gke-model-serving
           sed -i "s|{{PROJECT_ID}}|$PROJECT_ID|g" llm-deployment.yaml
           sed -i "s|{{ARTIFACT_REGISTRY}}|$ARTIFACT_REGISTRY|g" llm-deployment.yaml
           sed -i "s|{{REGION}}|$REGION|g" llm-deployment.yaml
