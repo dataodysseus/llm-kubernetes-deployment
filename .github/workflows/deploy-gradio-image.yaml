@@ -45,6 +45,7 @@ jobs:
           export ARTIFACT_REGISTRY=${{ secrets.GCP_ARTIFACT_REGISTRY }}
           export REGION=${{ secrets.GCP_REGION }}
 
+          cd TinyLlama-1.1B-Chat-v1.0/LLM-Gradio-App
           docker build -t $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY/gradio-app:latest .
           docker push $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY/gradio-app:latest
 
