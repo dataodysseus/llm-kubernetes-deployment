@@ -64,6 +64,17 @@ jobs:
             --from-literal=HUGGING_FACE_TOKEN=${{ secrets.HUGGING_FACE_TOKEN }} \
             --dry-run=client -o yaml | kubectl apply -f -
 
+      - name: Prepare Kubernetes Deployment Manifest
+        run: |
+          export PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
+          export ARTIFACT_REGISTRY=${{ secrets.GCP_ARTIFACT_REGISTRY }}
+          export REGION=${{ secrets.GCP_REGION }}
+
+          cd TinyLlama-1.1B-Chat-v1.0/LLM-Gradio-App
+          sed -i "s|{{PROJECT_ID}}|$PROJECT_ID|g" gradio-deployment.yaml
+          sed -i "s|{{ARTIFACT_REGISTRY}}|$ARTIFACT_REGISTRY|g" gradio-deployment.yaml
+          sed -i "s|{{REGION}}|$REGION|g" gradio-deployment.yaml
+
       - name: Deploy Image to GKE
         run: |
           cd TinyLlama-1.1B-Chat-v1.0/LLM-Gradio-App
