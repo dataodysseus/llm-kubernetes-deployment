@@ -37,7 +37,7 @@ jobs:
 
       - name: Set Working Directory
         run: |
-          cd TinyLlama-1.1B-Chat-v1.0/LLM-Gradio-App
+          cd Mistral-7B-Instruct-v0.3/LLM-Gradio-App
 
       - name: Create and Push Docker Image
         run: |
@@ -45,9 +45,9 @@ jobs:
           export ARTIFACT_REGISTRY=${{ secrets.GCP_ARTIFACT_REGISTRY }}
           export REGION=${{ secrets.GCP_REGION }}
 
-          cd TinyLlama-1.1B-Chat-v1.0/LLM-Gradio-App
-          docker build -t $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY/gradio-app:latest .
-          docker push $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY/gradio-app:latest
+          cd Mistral-7B-Instruct-v0.3/LLM-Gradio-App
+          docker build -t $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY/mistralai-gradio-app:latest .
+          docker push $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY/mistralai-gradio-app:latest
 
       - name: Get GKE Credentials
         run: |
@@ -70,14 +70,14 @@ jobs:
           export ARTIFACT_REGISTRY=${{ secrets.GCP_ARTIFACT_REGISTRY }}
           export REGION=${{ secrets.GCP_REGION }}
 
-          cd TinyLlama-1.1B-Chat-v1.0/LLM-Gradio-App
+          cd Mistral-7B-Instruct-v0.3/LLM-Gradio-App
           sed -i "s|{{PROJECT_ID}}|$PROJECT_ID|g" gradio-deployment.yaml
           sed -i "s|{{ARTIFACT_REGISTRY}}|$ARTIFACT_REGISTRY|g" gradio-deployment.yaml
           sed -i "s|{{REGION}}|$REGION|g" gradio-deployment.yaml
 
       - name: Deploy Image to GKE
         run: |
-          cd TinyLlama-1.1B-Chat-v1.0/LLM-Gradio-App
+          cd Mistral-7B-Instruct-v0.3/LLM-Gradio-App
           kubectl apply -f gradio-deployment.yaml
 
       - name: Wait for External IP
