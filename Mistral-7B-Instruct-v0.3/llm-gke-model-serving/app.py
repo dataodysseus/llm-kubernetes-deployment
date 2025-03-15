@@ -1,4 +1,5 @@
 # app.py
+import os
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 from transformers import AutoModelForCausalLM, AutoTokenizer
@@ -12,8 +13,19 @@ class MessagesRequest(BaseModel):
 
 # Load the model and tokenizer
 MODEL_ID = "mistralai/Mistral-7B-Instruct-v0.3"
-tokenizer = AutoTokenizer.from_pretrained(MODEL_ID)
-model = AutoModelForCausalLM.from_pretrained(MODEL_ID, torch_dtype=torch.float16, device_map="auto")
+HUGGING_FACE_HUB_TOKEN = os.getenv("HUGGING_FACE_HUB_TOKEN")
+
+if not HUGGING_FACE_HUB_TOKEN:
+    raise ValueError("HUGGING_FACE_HUB_TOKEN is not set!")
+
+# Load the model and tokenizer using the token
+tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, use_auth_token=HUGGING_FACE_HUB_TOKEN)
+model = AutoModelForCausalLM.from_pretrained(
+    MODEL_ID, 
+    torch_dtype=torch.float16, 
+    device_map="auto", 
+    use_auth_token=HUGGING_FACE_HUB_TOKEN
+)
 
 @app.post("/generate")
 async def generate(request: MessagesRequest):
