@@ -44,9 +44,13 @@ jobs:
           export PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
           export ARTIFACT_REGISTRY=${{ secrets.GCP_ARTIFACT_REGISTRY }}
           export REGION=${{ secrets.GCP_REGION }}
+          export REGION=${{ secrets.GCP_REGION }}
+          export HUGGING_FACE_TOKEN=${{ secrets.HUGGING_FACE_TOKEN }}
 
           cd Mistral-7B-Instruct-v0.3/llm-gke-model-serving
-          docker build -t $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY/mistralai-cpu-inference:latest .
+          docker build \
+          --build-arg $HUGGING_FACE_HUB_TOKEN \
+          -t $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY/mistralai-cpu-inference:latest .
           docker push $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY/mistralai-cpu-inference:latest
 
       - name: Get GKE Credentials

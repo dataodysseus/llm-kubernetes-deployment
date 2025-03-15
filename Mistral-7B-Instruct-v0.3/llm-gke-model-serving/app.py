@@ -7,18 +7,14 @@ import torch
 
 app = FastAPI()
 
-# Define a request model for the prompt
-class MessagesRequest(BaseModel):
-    messages: list  # List of dictionaries with "role" and "content" keys
-
-# Load the model and tokenizer
-MODEL_ID = "mistralai/Mistral-7B-Instruct-v0.3"
+# Read token from environment
 HUGGING_FACE_HUB_TOKEN = os.getenv("HUGGING_FACE_HUB_TOKEN")
 
 if not HUGGING_FACE_HUB_TOKEN:
     raise ValueError("HUGGING_FACE_HUB_TOKEN is not set!")
 
-# Load the model and tokenizer using the token
+# Load the model and tokenizer
+MODEL_ID = "mistralai/Mistral-7B-Instruct-v0.3"
 tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, use_auth_token=HUGGING_FACE_HUB_TOKEN)
 model = AutoModelForCausalLM.from_pretrained(
     MODEL_ID, 
@@ -27,6 +23,10 @@ model = AutoModelForCausalLM.from_pretrained(
     use_auth_token=HUGGING_FACE_HUB_TOKEN
 )
 
+# Define request format
+class MessagesRequest(BaseModel):
+    messages: list
+    
 @app.post("/generate")
 async def generate(request: MessagesRequest):
     try:
