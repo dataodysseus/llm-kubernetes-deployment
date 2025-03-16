@@ -15,6 +15,7 @@ RUN pip install --no-cache-dir \
     fastapi \
     pydantic \
     accelerate \
+    sentencepiece \
     protobuf==3.20.*
 
 # Copy the inference script
