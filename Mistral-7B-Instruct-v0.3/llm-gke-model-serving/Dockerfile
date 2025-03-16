@@ -16,7 +16,6 @@ RUN pip install --no-cache-dir \
     pydantic \
     accelerate \
     sentencepiece \
-    bitsandbytes \
     protobuf==3.20.*
 
 # Copy the inference script

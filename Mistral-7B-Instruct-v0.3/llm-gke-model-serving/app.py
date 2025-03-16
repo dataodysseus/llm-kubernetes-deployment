@@ -2,20 +2,13 @@
 import os
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from transformers import AutoModelForCausalLM, AutoTokenizer, BitsAndBytesConfig
+from transformers import AutoModelForCausalLM, AutoTokenizer
 import torch
 
 app = FastAPI()
 
-quantization_config = BitsAndBytesConfig(
-    load_in_4bit=True,  # Enable 4-bit quantization
-    bnb_4bit_use_double_quant=True,  # Enable nested quantization for better memory efficiency
-    bnb_4bit_quant_type="nf4",  # Use 4-bit NormalFloat quantization
-    bnb_4bit_compute_dtype=torch.float16  # Use float16 for computation
-)
-
 # Read token from environment
-HUGGING_FACE_HUB_TOKEN = os.environ.get("HUGGING_FACE_HUB_TOKEN")
+HUGGING_FACE_HUB_TOKEN = os.getenv("HUGGING_FACE_HUB_TOKEN")
 
 if not HUGGING_FACE_HUB_TOKEN:
     raise ValueError("HUGGING_FACE_HUB_TOKEN is not set!")
@@ -27,7 +20,6 @@ model = AutoModelForCausalLM.from_pretrained(
     MODEL_ID, 
     torch_dtype=torch.float16, 
     device_map="auto", 
-    quantization_config=quantization_config,  # Apply quantization config
     token=HUGGING_FACE_HUB_TOKEN
 )
 
