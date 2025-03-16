@@ -1,0 +1,57 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: llm
+  template:
+    metadata:
+      labels:
+        app: llm
+    spec:
+      containers:
+      - name: llm
+        image: {{REGION}}-docker.pkg.dev/{{PROJECT_ID}}/{{ARTIFACT_REGISTRY}}/mistralai-cpu-inference:latest
+        resources:
+          requests:
+            cpu: "2"
+            memory: "8Gi"
+          limits:
+            cpu: "4"
+            memory: "16Gi"
+        env:
+        - name: MODEL_ID
+          value: mistralai/Mistral-7B-Instruct-v0.3
+        - name: PORT
+          value: "8080"
+        - name: HUGGING_FACE_HUB_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: hf-secret  # Kubernetes secret name
+              key: HUGGING_FACE_HUB_TOKEN  # Key inside the secret
+        ports:
+        - containerPort: 8080
+        volumeMounts:
+          - mountPath: /dev/shm
+            name: dshm
+          - mountPath: /tmp
+            name: ephemeral-volume
+      volumes:
+        - name: dshm
+          emptyDir:
+              medium: Memory
+        - name: ephemeral-volume
+          ephemeral:
+            volumeClaimTemplate:
+              metadata:
+                labels:
+                  type: ephemeral
+              spec:
+                accessModes: ["ReadWriteOnce"]
+                storageClassName: "premium-rwo"
+                resources:
+                  requests:
+                    storage: 100Gi
