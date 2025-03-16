@@ -15,12 +15,12 @@ if not HUGGING_FACE_HUB_TOKEN:
 
 # Load the model and tokenizer
 MODEL_ID = "mistralai/Mistral-7B-Instruct-v0.3"
-tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, use_auth_token=HUGGING_FACE_HUB_TOKEN)
+tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, token=HUGGING_FACE_HUB_TOKEN)
 model = AutoModelForCausalLM.from_pretrained(
     MODEL_ID, 
     torch_dtype=torch.float16, 
     device_map="auto", 
-    use_auth_token=HUGGING_FACE_HUB_TOKEN
+    token=HUGGING_FACE_HUB_TOKEN
 )
 
 # Define request format

@@ -14,7 +14,8 @@ RUN pip install --no-cache-dir \
     uvicorn \
     fastapi \
     pydantic \
-    accelerate
+    accelerate \
+    protobuf==3.20.*
 
 # Copy the inference script
 COPY app.py /app.py
