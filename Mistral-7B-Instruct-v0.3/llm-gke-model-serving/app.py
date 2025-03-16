@@ -8,7 +8,7 @@ import torch
 app = FastAPI()
 
 # Read token from environment
-HUGGING_FACE_HUB_TOKEN = os.getenv("HUGGING_FACE_HUB_TOKEN")
+HUGGING_FACE_HUB_TOKEN = os.environ.get("HUGGING_FACE_HUB_TOKEN")
 
 if not HUGGING_FACE_HUB_TOKEN:
     raise ValueError("HUGGING_FACE_HUB_TOKEN is not set!")

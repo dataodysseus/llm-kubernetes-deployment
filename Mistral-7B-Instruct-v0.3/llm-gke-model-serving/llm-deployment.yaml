@@ -31,7 +31,7 @@ spec:
           valueFrom:
             secretKeyRef:
               name: hf-secret  # Kubernetes secret name
-              key: HUGGING_FACE_TOKEN  # Key inside the secret
+              key: HUGGING_FACE_HUB_TOKEN  # Key inside the secret
         ports:
         - containerPort: 8080
         volumeMounts:
