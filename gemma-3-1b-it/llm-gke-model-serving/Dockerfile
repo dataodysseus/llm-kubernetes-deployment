@@ -1,9 +1,10 @@
 # Use slim Python image for smaller footprint
 FROM python:3.9-slim
 
-# Install system dependencies (minimal to reduce image size)
+# Install system dependencies (including git)
 RUN apt-get update && apt-get install -y \
     build-essential \
+    git \
     && rm -rf /var/lib/apt/lists/*
 
 # Copy the requirements file first for caching benefits
