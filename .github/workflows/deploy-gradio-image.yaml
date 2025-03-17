@@ -87,8 +87,8 @@ jobs:
           sed -i "s|{{PROJECT_ID}}|$PROJECT_ID|g" gradio-deployment.yaml
           sed -i "s|{{ARTIFACT_REGISTRY}}|$ARTIFACT_REGISTRY|g" gradio-deployment.yaml
           sed -i "s|{{REGION}}|$REGION|g" gradio-deployment.yaml
-          sed -i "s|{{model_image}}|$model_image|g" llm-deployment.yaml          
-          sed -i "s|{{llm_model}}|$llm_model|g" llm-deployment.yaml  
+          sed -i "s|{{model_image}}|$model_image|g" gradio-deployment.yaml         
+          sed -i "s|{{llm_model}}|$llm_model|g" gradio-deployment.yaml  
 
       - name: Deploy Image to GKE
         run: |
