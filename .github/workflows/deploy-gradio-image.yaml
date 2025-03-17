@@ -8,7 +8,6 @@ on:
         required: true
         default: 'Mistral-7B-Instruct-v0.3'
         type: string
-    inputs:
       model_image:
         description: 'Model image name for deployment'
         required: true
@@ -90,7 +89,7 @@ jobs:
           sed -i "s|{{REGION}}|$REGION|g" gradio-deployment.yaml
           sed -i "s|{{model_image}}|$model_image|g" llm-deployment.yaml          
           sed -i "s|{{llm_model}}|$llm_model|g" llm-deployment.yaml  
-          
+
       - name: Deploy Image to GKE
         run: |
           cd ${{ inputs.llm_model }}/llm-gradio-app
