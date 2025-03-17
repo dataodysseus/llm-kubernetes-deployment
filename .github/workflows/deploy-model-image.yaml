@@ -2,6 +2,18 @@ name: Deploy Model Image (Manual)
 
 on:
   workflow_dispatch:
+    inputs:
+      llm_model:
+        description: 'Model name for deployment'
+        required: true
+        default: 'Mistral-7B-Instruct-v0.3'
+        type: string
+    inputs:
+      model_image:
+        description: 'Model image name for deployment'
+        required: true
+        default: 'mistralai'
+        type: string
 
 jobs:
   deploy:
@@ -37,7 +49,7 @@ jobs:
 
       - name: Set Working Directory
         run: |
-          cd Mistral-7B-Instruct-v0.3/llm-gke-model-serving
+          cd ${{ inputs.llm_model }}/llm-gke-model-serving
 
       - name: Create and Push Docker Image
         run: |
@@ -45,9 +57,9 @@ jobs:
           export ARTIFACT_REGISTRY=${{ secrets.GCP_ARTIFACT_REGISTRY }}
           export REGION=${{ secrets.GCP_REGION }}
 
-          cd Mistral-7B-Instruct-v0.3/llm-gke-model-serving
-          docker build -t $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY/mistralai-cpu-inference:latest .
-          docker push $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY/mistralai-cpu-inference:latest
+          cd ${{ inputs.llm_model }}/llm-gke-model-serving
+          docker build -t $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY/${{ inputs.model_image }}-cpu-inference:latest .
+          docker push $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY/${{ inputs.model_image }}-cpu-inference:latest
 
       - name: Get GKE Credentials
         run: |
@@ -63,20 +75,24 @@ jobs:
           export PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
           export ARTIFACT_REGISTRY=${{ secrets.GCP_ARTIFACT_REGISTRY }}
           export REGION=${{ secrets.GCP_REGION }}
+          export model_image=${{ inputs.model_image }}
+          export llm_model=${{ inputs.llm_model }}
 
-          cd Mistral-7B-Instruct-v0.3/llm-gke-model-serving
+          cd ${{ inputs.llm_model }}/llm-gke-model-serving
           sed -i "s|{{PROJECT_ID}}|$PROJECT_ID|g" llm-deployment.yaml
           sed -i "s|{{ARTIFACT_REGISTRY}}|$ARTIFACT_REGISTRY|g" llm-deployment.yaml
           sed -i "s|{{REGION}}|$REGION|g" llm-deployment.yaml
+          sed -i "s|{{model_image}}|$model_image|g" llm-deployment.yaml          
+          sed -i "s|{{llm_model}}|$llm_model|g" llm-deployment.yaml  
 
       - name: Deploy Image to GKE
         run: |
-          cd Mistral-7B-Instruct-v0.3/llm-gke-model-serving
+          cd ${{ inputs.llm_model }}/llm-gke-model-serving
           kubectl apply -f llm-deployment.yaml
 
       - name: Deploy LLM Service to GKE
         run: |
-          cd Mistral-7B-Instruct-v0.3/llm-gke-model-serving
+          cd ${{ inputs.llm_model }}/llm-gke-model-serving
           kubectl apply -f llm-service.yaml
 
       - name: Deploy to Kubernetes

@@ -11,18 +11,17 @@ RUN apt-get update && apt-get install -y \
 RUN pip install --no-cache-dir \
     torch \
     transformers \
+    git+https://github.com/huggingface/transformers@v4.49.0-Gemma-3 \
     uvicorn \
     fastapi \
     pydantic \
-    accelerate \
-    sentencepiece \
-    protobuf==3.20.*
+    accelerate 
 
 # Copy the inference script
 COPY app.py /app.py
 
 # Set environment variables
-ENV MODEL_ID=mistralai/Mistral-7B-Instruct-v0.3
+ENV MODEL_ID=google/gemma-3-1b-it
 ENV PORT=8080
 
 # Expose the port

@@ -2,7 +2,19 @@ name: Deploy Gradio Image (Manual)
 
 on:
   workflow_dispatch:
-
+    inputs:
+      llm_model:
+        description: 'Model name for deployment'
+        required: true
+        default: 'Mistral-7B-Instruct-v0.3'
+        type: string
+    inputs:
+      model_image:
+        description: 'Model image name for deployment'
+        required: true
+        default: 'mistralai'
+        type: string
+    
 jobs:
   deploy:
     runs-on: ubuntu-latest
@@ -37,7 +49,7 @@ jobs:
 
       - name: Set Working Directory
         run: |
-          cd Mistral-7B-Instruct-v0.3/llm-gradio-app
+          cd ${{ inputs.llm_model }}/llm-gradio-app
 
       - name: Create and Push Docker Image
         run: |
@@ -45,9 +57,9 @@ jobs:
           export ARTIFACT_REGISTRY=${{ secrets.GCP_ARTIFACT_REGISTRY }}
           export REGION=${{ secrets.GCP_REGION }}
 
-          cd Mistral-7B-Instruct-v0.3/llm-gradio-app
-          docker build -t $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY/mistralai-gradio-app:latest .
-          docker push $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY/mistralai-gradio-app:latest
+          cd ${{ inputs.llm_model }}/llm-gradio-app
+          docker build -t $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY/${{ inputs.model_image }}-gradio-app:latest .
+          docker push $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY/${{ inputs.model_image }}-gradio-app:latest
 
       - name: Get GKE Credentials
         run: |
@@ -69,15 +81,19 @@ jobs:
           export PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
           export ARTIFACT_REGISTRY=${{ secrets.GCP_ARTIFACT_REGISTRY }}
           export REGION=${{ secrets.GCP_REGION }}
+          export model_image=${{ inputs.model_image }}
+          export llm_model=${{ inputs.llm_model }}
 
-          cd Mistral-7B-Instruct-v0.3/llm-gradio-app
+          cd ${{ inputs.llm_model }}/llm-gradio-app
           sed -i "s|{{PROJECT_ID}}|$PROJECT_ID|g" gradio-deployment.yaml
           sed -i "s|{{ARTIFACT_REGISTRY}}|$ARTIFACT_REGISTRY|g" gradio-deployment.yaml
           sed -i "s|{{REGION}}|$REGION|g" gradio-deployment.yaml
-
+          sed -i "s|{{model_image}}|$model_image|g" llm-deployment.yaml          
+          sed -i "s|{{llm_model}}|$llm_model|g" llm-deployment.yaml  
+          
       - name: Deploy Image to GKE
         run: |
-          cd Mistral-7B-Instruct-v0.3/llm-gradio-app
+          cd ${{ inputs.llm_model }}/llm-gradio-app
           kubectl apply -f gradio-deployment.yaml
 
       - name: Wait for External IP
