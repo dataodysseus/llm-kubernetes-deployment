@@ -1,21 +1,16 @@
-# Dockerfile
+# Use slim Python image for smaller footprint
 FROM python:3.9-slim
 
-# Install system dependencies
+# Install system dependencies (minimal to reduce image size)
 RUN apt-get update && apt-get install -y \
     build-essential \
-    libopenblas-dev \
     && rm -rf /var/lib/apt/lists/*
 
-# Install Python dependencies
-RUN pip install --no-cache-dir \
-    torch \
-    transformers \
-    git+https://github.com/huggingface/transformers@v4.49.0-Gemma-3 \
-    uvicorn \
-    fastapi \
-    pydantic \
-    accelerate 
+# Copy the requirements file first for caching benefits
+COPY requirements.txt /requirements.txt
+
+# Install Python dependencies in one step to leverage Docker caching
+RUN pip install --no-cache-dir -r /requirements.txt
 
 # Copy the inference script
 COPY app.py /app.py
@@ -23,6 +18,7 @@ COPY app.py /app.py
 # Set environment variables
 ENV MODEL_ID=google/gemma-3-1b-it
 ENV PORT=8080
+ENV PYTHONUNBUFFERED=1
 
 # Expose the port
 EXPOSE 8080
