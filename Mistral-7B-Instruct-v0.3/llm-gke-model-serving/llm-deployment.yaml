@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: llm
-        image: {{REGION}}-docker.pkg.dev/{{PROJECT_ID}}/{{ARTIFACT_REGISTRY}}/mistralai-cpu-inference:latest
+        image: {{REGION}}-docker.pkg.dev/{{PROJECT_ID}}/{{ARTIFACT_REGISTRY}}/{{model_image}}-cpu-inference:latest
         resources:
           requests:
             cpu: "2"
@@ -24,7 +24,7 @@ spec:
             memory: "16Gi"
         env:
         - name: MODEL_ID
-          value: mistralai/Mistral-7B-Instruct-v0.3
+          value: {{model_image}}/{{llm_model}}
         - name: PORT
           value: "8080"
         - name: HUGGING_FACE_HUB_TOKEN

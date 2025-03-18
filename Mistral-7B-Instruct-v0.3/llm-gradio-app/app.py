@@ -22,12 +22,6 @@ def generate_response(user_input):
     if response.status_code == 200:
         response_text = response.json()['response']
         return response_text
-        # assistant_start = response_text.find("<|assistant|>")
-        # if assistant_start != -1:
-        #     cleaned_output = response_text[assistant_start + len("<|assistant|>"):].strip()
-        #     return cleaned_output
-        # else:
-        #     return "Could not find <|assistant|> in the response."
     else:
         return f"Error: {response.status_code} {response.text}"
     

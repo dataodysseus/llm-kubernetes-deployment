@@ -11,7 +11,6 @@ RUN apt-get update && apt-get install -y \
 RUN pip install --no-cache-dir \
     torch \
     transformers \
-    google-cloud-storage \
     uvicorn \
     fastapi \
     pydantic \
