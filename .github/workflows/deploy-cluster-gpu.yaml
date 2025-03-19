@@ -1,4 +1,4 @@
-name: Deploy GKE Cluster (Manual)
+name: Deploy GPU GKE Cluster (Manual)
 
 on:
   workflow_dispatch:
