@@ -2,6 +2,17 @@ name: Deploy GKE Cluster (Manual)
 
 on:
   workflow_dispatch:
+    inputs:
+      cluster_name:
+        description: 'Cluster name'
+        required: true
+        default: 'llm-deploy-cpu'
+        type: string
+      machine_type:
+        description: 'Machine type'
+        required: true
+        default: 'n2d-standard-4'
+        type: string
 
 jobs:
   deploy:
@@ -40,10 +51,10 @@ jobs:
             echo "Cluster llm-deploy already exists. Skipping creation."
           else
             echo "Cluster llm-deploy does not exist. Creating..."
-            gcloud container clusters create llm-deploy --location ${{ secrets.GCP_REGION }} \
+            gcloud container clusters create ${{ inputs.cluster_name }} --location ${{ secrets.GCP_REGION }} \
               --workload-pool ${{ secrets.GCP_PROJECT_ID }}.svc.id.goog \
               --enable-image-streaming --node-locations=${{ secrets.GCP_REGION }}-a \
-              --machine-type n2d-standard-8 --num-nodes 1 \
+              --machine-type ${{ inputs.machine_type }} --num-nodes 1 \
               --release-channel=rapid
           fi
         
