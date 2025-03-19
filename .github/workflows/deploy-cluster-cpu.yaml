@@ -47,10 +47,10 @@ jobs:
           gcloud config set project ${{ secrets.GCP_PROJECT_ID }}
         
           # Check if the cluster already exists
-          if gcloud container clusters describe llm-deploy --region=${{ secrets.GCP_REGION }} --project=${{ secrets.GCP_PROJECT_ID }} &>/dev/null; then
+          if gcloud container clusters describe ${{ inputs.cluster_name }} --region=${{ secrets.GCP_REGION }} --project=${{ secrets.GCP_PROJECT_ID }} &>/dev/null; then
             echo "Cluster llm-deploy already exists. Skipping creation."
           else
-            echo "Cluster llm-deploy does not exist. Creating..."
+            echo "Cluster does not exist. Creating..."
             gcloud container clusters create ${{ inputs.cluster_name }} --location ${{ secrets.GCP_REGION }} \
               --workload-pool ${{ secrets.GCP_PROJECT_ID }}.svc.id.goog \
               --enable-image-streaming --node-locations=${{ secrets.GCP_REGION }}-a \
@@ -59,7 +59,7 @@ jobs:
           fi
         
           # Get cluster credentials
-          gcloud container clusters get-credentials llm-deploy --region=${{ secrets.GCP_REGION }} --project=${{ secrets.GCP_PROJECT_ID }}
+          gcloud container clusters get-credentials ${{ inputs.cluster_name }} --region=${{ secrets.GCP_REGION }} --project=${{ secrets.GCP_PROJECT_ID }}
 
         
 

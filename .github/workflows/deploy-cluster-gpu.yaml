@@ -1,0 +1,115 @@
+name: Deploy GKE Cluster (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      cluster_name:
+        description: 'Cluster name'
+        required: true
+        default: 'llm-deploy-gpu'
+        type: string
+      machine_type:
+        description: 'Machine type'
+        required: true
+        default: 'g2-standard-8'
+        type: string
+      node_pools_name:
+        description: 'Node pools name'
+        required: true
+        default: 'gpupool'
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'  # Required for Workload Identity Federation
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Authenticate with Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+          workload_identity_provider: "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}"
+          service_account: "${{ secrets.GCP_SERVICE_ACCOUNT }}"
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+
+      - name: Enable Required Services
+        run: |
+          gcloud services enable container.googleapis.com
+
+      - name: Create GKE Standard Cluster (if not exists)
+        run: |
+          #!/bin/bash
+          gcloud config set project ${{ secrets.GCP_PROJECT_ID }}
+        
+          # Check if the cluster already exists
+          if gcloud container clusters describe ${{ inputs.cluster_name }} --region=${{ secrets.GCP_REGION }} --project=${{ secrets.GCP_PROJECT_ID }} &>/dev/null; then
+            echo "Cluster ${{ inputs.cluster_name }} already exists. Skipping creation."
+          else
+            echo "Cluster does not exist. Creating..."
+            gcloud container clusters create ${{ inputs.cluster_name }} \
+              --project=${{ secrets.GCP_PROJECT_ID }}  \
+              --region=${{ secrets.GCP_REGION }}  \
+              --workload-pool=${{ secrets.GCP_PROJECT_ID }}.svc.id.goog \
+              --addons GcsFuseCsiDriver \
+              --release-channel=rapid \
+              --num-nodes=1 --async
+
+            # Wait for the cluster to be in RUNNING state
+            echo "Waiting for cluster to be created..."
+            while true; do
+              STATUS=$(gcloud container clusters describe ${{ inputs.cluster_name }} --region=${{ secrets.GCP_REGION }} --project=${{ secrets.GCP_PROJECT_ID }} --format="value(status)")
+              if [ "$STATUS" = "RUNNING" ]; then
+                echo "Cluster is now RUNNING."
+                break
+              elif [ "$STATUS" = "ERROR" ]; then
+                echo "Cluster creation failed with status ERROR."
+                exit 1
+              else
+                echo "Cluster status: $STATUS. Waiting..."
+                sleep 30
+              fi
+            done
+          fi
+
+          # Get cluster credentials
+          gcloud container clusters get-credentials ${{ inputs.cluster_name }} --region=${{ secrets.GCP_REGION }} --project=${{ secrets.GCP_PROJECT_ID }}
+
+          # Create the node pool
+          gcloud container node-pools create ${{ inputs.node_pools_name }} \
+          --accelerator type=nvidia-l4,count=1,gpu-driver-version=latest \
+          --project=${{ secrets.GCP_PROJECT_ID }} \
+          --location=${{ secrets.GCP_REGION }} \
+          --node-locations=${{ secrets.GCP_REGION }}-a \
+          --cluster=${{ inputs.cluster_name }} \
+          --machine-type=${{ inputs.machine_type }} \
+          --num-nodes=1
+
+      - name: Create a Kubernetes ServiceAccount in GKE cluster
+        run: |
+          export K8S_SA_NAME=gpu-k8s-sa
+          kubectl create namespace gke-ai-namespace
+          kubectl create serviceaccount gpu-k8s-sa --namespace=gke-ai-namespace
+
+      - name: Bind the Kubernetes ServiceAccount to the Google Cloud service account
+        run: |
+          # Add an IAM binding to the Google Cloud service account:
+          gcloud iam service-accounts add-iam-policy-binding gke-ai-sa@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com \
+              --role roles/iam.workloadIdentityUser \
+              --member "serviceAccount:${{ secrets.GCP_PROJECT_ID }}.svc.id.goog[gke-ai-namespace/gpu-k8s-sa]"
+
+          # Annotate the Kubernetes ServiceAccount:
+          kubectl annotate serviceaccount gpu-k8s-sa \
+              --namespace gke-ai-namespace \
+              iam.gke.io/gcp-service-account=gke-ai-sa@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com
+      
+
