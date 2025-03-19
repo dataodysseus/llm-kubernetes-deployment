@@ -85,14 +85,14 @@ jobs:
           gcloud container clusters get-credentials ${{ inputs.cluster_name }} --region=${{ secrets.GCP_REGION }} --project=${{ secrets.GCP_PROJECT_ID }}
 
           # Create the node pool
-          gcloud container node-pools create ${{ inputs.node_pools_name }} \
-          --accelerator type=nvidia-l4,count=1,gpu-driver-version=latest \
-          --project=${{ secrets.GCP_PROJECT_ID }} \
-          --location=${{ secrets.GCP_REGION }} \
-          --node-locations=${{ secrets.GCP_REGION }}-a \
-          --cluster=${{ inputs.cluster_name }} \
-          --machine-type=${{ inputs.machine_type }} \
-          --num-nodes=1
+          # gcloud container node-pools create ${{ inputs.node_pools_name }} \
+          # --accelerator type=nvidia-l4,count=1,gpu-driver-version=latest \
+          # --project=${{ secrets.GCP_PROJECT_ID }} \
+          # --location=${{ secrets.GCP_REGION }} \
+          # --node-locations=${{ secrets.GCP_REGION }}-a \
+          # --cluster=${{ inputs.cluster_name }} \
+          # --machine-type=${{ inputs.machine_type }} \
+          # --num-nodes=1
 
       - name: Create a Kubernetes ServiceAccount in GKE cluster
         run: |
