@@ -93,7 +93,12 @@ jobs:
           # --cluster=${{ inputs.cluster_name }} \
           # --machine-type=${{ inputs.machine_type }} \
           # --num-nodes=1
-
+          
+      - name: Install gke-gcloud-auth-plugin
+        run: |
+          gcloud components install gke-gcloud-auth-plugin
+          export USE_GKE_GCLOUD_AUTH_PLUGIN=True
+          
       - name: Create a Kubernetes ServiceAccount in GKE cluster
         run: |
           export K8S_SA_NAME=gpu-k8s-sa
