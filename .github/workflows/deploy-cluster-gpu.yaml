@@ -11,7 +11,7 @@ on:
       cpu_machine_type:
         description: 'CPU Machine type'
         required: true
-        default: 'n2d-standard-4'
+        default: 'n2d-standard-8'
         type: string          
       gpu_machine_type:
         description: 'GPU Machine type'
