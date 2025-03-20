@@ -8,10 +8,15 @@ on:
         required: true
         default: 'llm-deploy-gpu'
         type: string
-      machine_type:
-        description: 'Machine type'
+      cpu_machine_type:
+        description: 'CPU Machine type'
         required: true
-        default: 'g2-standard-8'
+        default: 'n2d-standard-4'
+        type: string          
+      gpu_machine_type:
+        description: 'GPU Machine type'
+        required: true
+        default: 'g2-standard-4'
         type: string
       node_pools_name:
         description: 'Node pools name'
@@ -57,12 +62,14 @@ jobs:
           else
             echo "Cluster does not exist. Creating..."
             gcloud container clusters create ${{ inputs.cluster_name }} \
-              --project=${{ secrets.GCP_PROJECT_ID }}  \
-              --region=${{ secrets.GCP_REGION }}  \
-              --workload-pool=${{ secrets.GCP_PROJECT_ID }}.svc.id.goog \
+              --location ${{ secrets.GCP_REGION }} \
+              --workload-pool ${{ secrets.GCP_PROJECT_ID }}.svc.id.goog \
               --addons GcsFuseCsiDriver \
+              --enable-image-streaming \
+              --node-locations=${{ secrets.GCP_REGION }}-a \
+              --machine-type ${{ inputs.cpu_machine_type }} --num-nodes 1 \
               --release-channel=rapid \
-              --num-nodes=1 --async
+              --async  
 
             # Wait for the cluster to be in RUNNING state
             echo "Waiting for cluster to be created..."
@@ -85,36 +92,21 @@ jobs:
           gcloud container clusters get-credentials ${{ inputs.cluster_name }} --region=${{ secrets.GCP_REGION }} --project=${{ secrets.GCP_PROJECT_ID }}
 
           # Create the node pool
-          # gcloud container node-pools create ${{ inputs.node_pools_name }} \
-          # --accelerator type=nvidia-l4,count=1,gpu-driver-version=latest \
-          # --project=${{ secrets.GCP_PROJECT_ID }} \
-          # --location=${{ secrets.GCP_REGION }} \
-          # --node-locations=${{ secrets.GCP_REGION }}-a \
-          # --cluster=${{ inputs.cluster_name }} \
-          # --machine-type=${{ inputs.machine_type }} \
-          # --num-nodes=1
+          gcloud container node-pools create ${{ inputs.node_pools_name }} --cluster ${{ inputs.cluster_name }} \
+            --accelerator type=nvidia-l4,count=1,gpu-driver-version=latest \
+            --machine-type ${{ inputs.gpu_machine_type }} \
+            --enable-image-streaming \
+            --num-nodes=1 \
+            --node-locations ${{ secrets.GCP_REGION }}-a --spot
           
       - name: Install gke-gcloud-auth-plugin
         run: |
           gcloud components install gke-gcloud-auth-plugin
           export USE_GKE_GCLOUD_AUTH_PLUGIN=True
           
-      - name: Create a Kubernetes ServiceAccount in GKE cluster
+      - name: Configure kubectl to communicate cluster:
         run: |
-          export K8S_SA_NAME=gpu-k8s-sa
-          kubectl create namespace gke-ai-namespace
-          kubectl create serviceaccount gpu-k8s-sa --namespace=gke-ai-namespace
+          gcloud container clusters get-credentials ${{ inputs.cluster_name }} --region=${{ secrets.GCP_REGION }}
 
-      - name: Bind the Kubernetes ServiceAccount to the Google Cloud service account
-        run: |
-          # Add an IAM binding to the Google Cloud service account:
-          gcloud iam service-accounts add-iam-policy-binding gke-ai-sa@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com \
-              --role roles/iam.workloadIdentityUser \
-              --member "serviceAccount:${{ secrets.GCP_PROJECT_ID }}.svc.id.goog[gke-ai-namespace/gpu-k8s-sa]"
-
-          # Annotate the Kubernetes ServiceAccount:
-          kubectl annotate serviceaccount gpu-k8s-sa \
-              --namespace gke-ai-namespace \
-              iam.gke.io/gcp-service-account=gke-ai-sa@${{ secrets.GCP_PROJECT_ID }}.iam.gserviceaccount.com
       
 
