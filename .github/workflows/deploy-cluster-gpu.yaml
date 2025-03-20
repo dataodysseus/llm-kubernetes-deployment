@@ -107,6 +107,9 @@ jobs:
             --cluster=${{ inputs.cluster_name }} \
             --machine-type=${{ inputs.gpu_machine_type }} \
             --num-nodes=1
+
+          # Configure kubectl to communicate with your cluster:
+          gcloud container clusters get-credentials l4-demo --region=${{ secrets.GCP_REGION }}
           
       
 
