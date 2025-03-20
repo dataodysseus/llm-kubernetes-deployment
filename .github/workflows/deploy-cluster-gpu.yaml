@@ -91,22 +91,22 @@ jobs:
           # Get cluster credentials
           gcloud container clusters get-credentials ${{ inputs.cluster_name }} --region=${{ secrets.GCP_REGION }} --project=${{ secrets.GCP_PROJECT_ID }}
 
-          # Create the node pool
-          gcloud container node-pools create ${{ inputs.node_pools_name }} --cluster ${{ inputs.cluster_name }} \
-            --accelerator type=nvidia-l4,count=1,gpu-driver-version=latest \
-            --machine-type ${{ inputs.gpu_machine_type }} \
-            --enable-image-streaming \
-            --num-nodes=1 \
-            --node-locations ${{ secrets.GCP_REGION }}-a --spot
+      #     # Create the node pool
+      #     gcloud container node-pools create ${{ inputs.node_pools_name }} --cluster ${{ inputs.cluster_name }} \
+      #       --accelerator type=nvidia-l4,count=1,gpu-driver-version=latest \
+      #       --machine-type ${{ inputs.gpu_machine_type }} \
+      #       --enable-image-streaming \
+      #       --num-nodes=1 \
+      #       --node-locations ${{ secrets.GCP_REGION }}-a --spot
           
-      - name: Install gke-gcloud-auth-plugin
-        run: |
-          gcloud components install gke-gcloud-auth-plugin
-          export USE_GKE_GCLOUD_AUTH_PLUGIN=True
+      # - name: Install gke-gcloud-auth-plugin
+      #   run: |
+      #     gcloud components install gke-gcloud-auth-plugin
+      #     export USE_GKE_GCLOUD_AUTH_PLUGIN=True
           
-      - name: Configure kubectl to communicate cluster:
-        run: |
-          gcloud container clusters get-credentials ${{ inputs.cluster_name }} --region=${{ secrets.GCP_REGION }}
+      # - name: Configure kubectl to communicate cluster:
+      #   run: |
+      #     gcloud container clusters get-credentials ${{ inputs.cluster_name }} --region=${{ secrets.GCP_REGION }}
 
       
 
