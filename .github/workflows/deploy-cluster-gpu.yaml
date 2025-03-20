@@ -100,12 +100,13 @@ jobs:
         run: |
           # Create the node pool
           gcloud container node-pools create ${{ inputs.node_pools_name }} \
-            --cluster ${{ inputs.cluster_name }} \
             --accelerator type=nvidia-l4,count=1,gpu-driver-version=latest \
-            --machine-type ${{ inputs.gpu_machine_type }} \
-            --enable-image-streaming \
-            --num-nodes=1 \
-            --node-locations ${{ secrets.GCP_REGION }}-a --spot
+            --project=${{ secrets.GCP_PROJECT_ID }} \
+            --location=${{ secrets.GCP_REGION }} \
+            --node-locations=${{ secrets.GCP_REGION }}-a \
+            --cluster=${{ inputs.cluster_name }} \
+            --machine-type=${{ inputs.gpu_machine_type }} \
+            --num-nodes=1
           
       
 
