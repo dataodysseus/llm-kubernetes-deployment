@@ -98,9 +98,6 @@ jobs:
           
       - name: Create the node pool
         run: |
-          #!/bin/bash
-          gcloud config set project ${{ secrets.GCP_PROJECT_ID }}
-
           # Create the node pool
           gcloud container node-pools create ${{ inputs.node_pools_name }} \
             --cluster ${{ inputs.cluster_name }} \
