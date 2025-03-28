@@ -110,6 +110,33 @@ jobs:
 
           # Configure kubectl to communicate with your cluster:
           gcloud container clusters get-credentials ${{ inputs.cluster_name }} --region=${{ secrets.GCP_REGION }}
+
+      - name: Create a Kubernetes namespace
+        run: |
+          kubectl create namespace gke-ai-namespace
+
+      - name: Create a Kubernetes ServiceAccount in the namespace
+        run: |
+          kubectl create serviceaccount gpu-k8s-sa --namespace=gke-ai-namespace
           
-      
+      - name: Add an IAM binding to the Google Cloud service account
+        run: |
+          gcloud iam service-accounts add-iam-policy-binding ${{ secrets.GCP_SERVICE_ACCOUNT }} \
+              --role roles/iam.workloadIdentityUser \
+              --member "serviceAccount:${{ secrets.GCP_PROJECT_ID }}.svc.id.goog[gke-ai-namespace/gpu-k8s-sa]"
+
+      - name: Annotate the Kubernetes ServiceAccount
+        run: |
+          kubectl annotate serviceaccount gpu-k8s-sa \
+              --namespace gke-ai-namespace \
+              iam.gke.io/gcp-service-account=${{ secrets.GCP_SERVICE_ACCOUNT }}
+
+      - name: Deploy the online inference server
+        run: |
+          export GSBUCKET=llm-test-bucket-2025
+          gcloud storage cp src/triton-model-repository gs://$GSBUCKET --recursive
+          envsubst < src/gke-config/deployment-triton.yaml | kubectl --namespace=gke-ai-namespace apply -f -
+          kubectl get deployments --namespace=gke-ai-namespace
+          kubectl apply --namespace=gke-ai-namespace -f src/gke-config/service-triton.yaml
+          kubectl get services --namespace=gke-ai-namespace
 
