@@ -133,12 +133,4 @@ jobs:
               --namespace gke-ai-namespace \
               iam.gke.io/gcp-service-account=${{ secrets.GCP_SERVICE_ACCOUNT }}
 
-      - name: Deploy the online inference server
-        run: |
-          export GSBUCKET=llm-test-bucket-2025
-          gcloud storage cp src/triton-model-repository gs://$GSBUCKET --recursive
-          envsubst < src/gke-config/deployment-triton.yaml | kubectl --namespace=gke-ai-namespace apply -f -
-          kubectl get deployments --namespace=gke-ai-namespace
-          kubectl apply --namespace=gke-ai-namespace -f src/gke-config/service-triton.yaml
-          kubectl get services --namespace=gke-ai-namespace
 
