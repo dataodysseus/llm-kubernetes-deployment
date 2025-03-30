@@ -119,18 +119,6 @@ jobs:
         run: |
           kubectl create serviceaccount gpu-k8s-sa --namespace=gke-ai-namespace
 
-      - name: Grant Service Account Admin Role
-        run: |
-          gcloud projects add-iam-policy-binding ${{ secrets.GCP_PROJECT_ID }} \
-            --member="serviceAccount:${{ secrets.GCP_SERVICE_ACCOUNT }}" \
-            --role="roles/iam.serviceAccountAdmin"
-
-      - name: Verify Your IAM Permissions
-        run: |
-          gcloud iam service-accounts get-iam-policy ${{ secrets.GCP_SERVICE_ACCOUNT }}
-
-          gcloud iam service-accounts get-iam-policy ${{ secrets.GCP_SERVICE_ACCOUNT }}
-
       - name: Add an IAM binding to the Google Cloud service account
         run: |
           gcloud iam service-accounts add-iam-policy-binding ${{ secrets.GCP_SERVICE_ACCOUNT }} \
