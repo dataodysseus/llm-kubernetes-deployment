@@ -111,9 +111,14 @@ jobs:
       #     # Configure kubectl to communicate with your cluster:
       #     gcloud container clusters get-credentials ${{ inputs.cluster_name }} --region=${{ secrets.GCP_REGION }}
 
-      - name: Create a Kubernetes namespace
+      - name: Create a Kubernetes namespace if it does not exist
         run: |
-          kubectl create namespace gke-ai-namespace
+          if ! kubectl get namespace gke-ai-namespace >/dev/null 2>&1; then
+            kubectl create namespace gke-ai-namespace
+            echo "Namespace 'gke-ai-namespace' created."
+          else
+            echo "Namespace 'gke-ai-namespace' already exists. Skipping."
+          fi
 
       - name: Create a Kubernetes ServiceAccount in the namespace
         run: |
