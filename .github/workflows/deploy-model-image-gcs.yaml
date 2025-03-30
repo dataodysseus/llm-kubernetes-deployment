@@ -1,4 +1,4 @@
-name: Deploy Model Image (Manual)
+name: Deploy Model Image GCS (Manual)
 
 on:
   workflow_dispatch:

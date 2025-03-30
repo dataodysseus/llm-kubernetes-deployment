@@ -1,4 +1,4 @@
-name: Deploy Gradio Image (Manual)
+name: Deploy Gradio Image Huggingface (Manual)
 
 on:
   workflow_dispatch:

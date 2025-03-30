@@ -1,4 +1,4 @@
-name: Deploy CPU GKE Cluster (Manual)
+name: Deploy Cluster CPU Huggingface (Manual)
 
 on:
   workflow_dispatch:
