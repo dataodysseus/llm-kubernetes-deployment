@@ -105,20 +105,4 @@ jobs:
       - name: Deploy LLM Service to GKE
         run: |
           cd ${{ inputs.llm_model }}/llm-gke-model-serving
-          kubectl apply -f llm-service.yaml
-
-      - name: Deploy hf-secret to Kubernetes
-        run: |
-          kubectl create secret generic hf-secret \
-            --from-literal=HUGGING_FACE_HUB_TOKEN=${{ secrets.HUGGING_FACE_HUB_TOKEN }} \
-            --dry-run=client -o yaml | kubectl apply -f -
-
-          kubectl set env deployment/llm HUGGING_FACE_HUB_TOKEN=${{ secrets.HUGGING_FACE_HUB_TOKEN }}
-
-      - name: Deploy to Kubernetes
-        run: |
-          kubectl create secret generic hf-secret \
-            --from-literal=HUGGING_FACE_HUB_TOKEN=${{ secrets.HUGGING_FACE_HUB_TOKEN }} \
-            --dry-run=client -o yaml | kubectl apply -f -
-
-          kubectl set env deployment/llm HUGGING_FACE_HUB_TOKEN=${{ secrets.HUGGING_FACE_HUB_TOKEN }}          
+          kubectl apply -f llm-service.yaml      
