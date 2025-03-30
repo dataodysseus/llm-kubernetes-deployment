@@ -12,6 +12,7 @@ spec:
       labels:
         app: llm
     spec:
+      serviceAccountName: gpu-k8s-sa
       containers:
       - name: llm
         image: {{REGION}}-docker.pkg.dev/{{PROJECT_ID}}/{{ARTIFACT_REGISTRY}}/{{model_image}}-cpu-inference:latest
@@ -23,35 +24,19 @@ spec:
             cpu: "4"
             memory: "16Gi"
         env:
-        - name: MODEL_ID
-          value: {{model_image}}/{{llm_model}}
+        - name: MODEL_DIR
+          value: "/app/model_weights"
         - name: PORT
           value: "8080"
-        - name: HUGGING_FACE_HUB_TOKEN
-          valueFrom:
-            secretKeyRef:
-              name: hf-secret  # Kubernetes secret name
-              key: HUGGING_FACE_HUB_TOKEN  # Key inside the secret
         ports:
         - containerPort: 8080
         volumeMounts:
-          - mountPath: /dev/shm
-            name: dshm
-          - mountPath: /tmp
-            name: ephemeral-volume
+        - mountPath: "/app/model_weights"
+          name: gcsfuse-volume
       volumes:
-        - name: dshm
-          emptyDir:
-              medium: Memory
-        - name: ephemeral-volume
-          ephemeral:
-            volumeClaimTemplate:
-              metadata:
-                labels:
-                  type: ephemeral
-              spec:
-                accessModes: ["ReadWriteOnce"]
-                storageClassName: "premium-rwo"
-                resources:
-                  requests:
-                    storage: 100Gi
+      - name: gcsfuse-volume
+        csi:
+          driver: gcsfuse.csi.storage.gke.io
+          volumeAttributes:
+            bucketName: {{bucket_name}}
+            mountOptions: "implicit-dirs"

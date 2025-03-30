@@ -1,0 +1,124 @@
+name: Deploy Model Image (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      llm_model:
+        description: 'Model name for deployment'
+        required: true
+        default: 'Mistral-7B-Instruct-v0.3'
+        type: string
+      model_image:
+        description: 'Model image name for deployment'
+        required: true
+        default: 'mistralai'
+        type: string
+      cluster_name:
+        description: 'Cluster name'
+        required: true
+        default: 'llm-deploy-gpu'
+        type: string
+      bucket_name:
+        description: 'GCS bucket name'
+        required: true
+        default: 'llm-test-bucket-2025'
+        type: string        
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'  # Required for Workload Identity Federation
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Authenticate with Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+          workload_identity_provider: "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}"
+          service_account: "${{ secrets.GCP_SERVICE_ACCOUNT }}"
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+
+      - name: Enable Required Services
+        run: |
+          gcloud services enable container.googleapis.com artifactregistry.googleapis.com
+
+      - name: Configure Docker to Authenticate with Google Artifact Registry
+        run: |
+          export REGION=${{ secrets.GCP_REGION }}
+          gcloud auth configure-docker $REGION-docker.pkg.dev
+
+      - name: Set Working Directory
+        run: |
+          cd ${{ inputs.llm_model }}/llm-gke-model-serving
+
+      - name: Create and Push Docker Image
+        run: |
+          export PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
+          export ARTIFACT_REGISTRY=${{ secrets.GCP_ARTIFACT_REGISTRY }}
+          export REGION=${{ secrets.GCP_REGION }}
+
+          cd ${{ inputs.llm_model }}/llm-gke-model-serving
+          docker build -t $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY/${{ inputs.model_image }}-cpu-inference:latest .
+          docker push $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY/${{ inputs.model_image }}-cpu-inference:latest
+
+      - name: Get GKE Credentials
+        run: |
+          gcloud container clusters get-credentials ${{ inputs.cluster_name }} --region ${{ secrets.GCP_REGION }} --project ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Install gke-gcloud-auth-plugin
+        run: |
+          gcloud components install gke-gcloud-auth-plugin
+          export USE_GKE_GCLOUD_AUTH_PLUGIN=True
+
+      - name: Prepare Kubernetes Deployment Manifest
+        run: |
+          export PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
+          export ARTIFACT_REGISTRY=${{ secrets.GCP_ARTIFACT_REGISTRY }}
+          export REGION=${{ secrets.GCP_REGION }}
+          export model_image=${{ inputs.model_image }}
+          export llm_model=${{ inputs.llm_model }}
+          export llm_model=${{ inputs.bucket_name }}
+
+          cd ${{ inputs.llm_model }}/llm-gke-model-serving
+          sed -i "s|{{PROJECT_ID}}|$PROJECT_ID|g" llm-deployment.yaml
+          sed -i "s|{{ARTIFACT_REGISTRY}}|$ARTIFACT_REGISTRY|g" llm-deployment.yaml
+          sed -i "s|{{REGION}}|$REGION|g" llm-deployment.yaml
+          sed -i "s|{{model_image}}|$model_image|g" llm-deployment.yaml          
+          sed -i "s|{{llm_model}}|$llm_model|g" llm-deployment.yaml  
+          sed -i "s|{{bucket_name}}|$bucket_name|g" llm-deployment.yaml  
+          sed -i "s|{{bucket_name}}|$bucket_name|g" Dockerfile  
+
+      - name: Deploy Image to GKE
+        run: |
+          cd ${{ inputs.llm_model }}/llm-gke-model-serving
+          kubectl apply -f llm-deployment.yaml
+
+      - name: Deploy LLM Service to GKE
+        run: |
+          cd ${{ inputs.llm_model }}/llm-gke-model-serving
+          kubectl apply -f llm-service.yaml
+
+      - name: Deploy hf-secret to Kubernetes
+        run: |
+          kubectl create secret generic hf-secret \
+            --from-literal=HUGGING_FACE_HUB_TOKEN=${{ secrets.HUGGING_FACE_HUB_TOKEN }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          kubectl set env deployment/llm HUGGING_FACE_HUB_TOKEN=${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+
+      - name: Deploy to Kubernetes
+        run: |
+          kubectl create secret generic hf-secret \
+            --from-literal=HUGGING_FACE_HUB_TOKEN=${{ secrets.HUGGING_FACE_HUB_TOKEN }} \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          kubectl set env deployment/llm HUGGING_FACE_HUB_TOKEN=${{ secrets.HUGGING_FACE_HUB_TOKEN }}          

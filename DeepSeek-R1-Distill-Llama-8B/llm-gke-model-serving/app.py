@@ -7,20 +7,13 @@ import torch
 
 app = FastAPI()
 
-# Read token from environment
-HUGGING_FACE_HUB_TOKEN = os.getenv("HUGGING_FACE_HUB_TOKEN")
-
-if not HUGGING_FACE_HUB_TOKEN:
-    raise ValueError("HUGGING_FACE_HUB_TOKEN is not set!")
-
 # Load the model and tokenizer
-MODEL_ID = "mistralai/Mistral-7B-Instruct-v0.3"
-tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, token=HUGGING_FACE_HUB_TOKEN)
+MODEL_DIR = os.getenv("MODEL_DIR", "/app/model_weights")
+tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR)
 model = AutoModelForCausalLM.from_pretrained(
-    MODEL_ID, 
+    MODEL_DIR, 
     torch_dtype=torch.float16, 
-    device_map="auto", 
-    token=HUGGING_FACE_HUB_TOKEN
+    device_map="auto"
 )
 
 # Define request format
@@ -34,12 +27,12 @@ async def generate(request: MessagesRequest):
         prompt = tokenizer.apply_chat_template(request.messages, tokenize=False, add_generation_prompt=True)
         
         # Tokenize the prompt
-        inputs = tokenizer(prompt, return_tensors="pt").to(model.device)
+        inputs = tokenizer([prompt], return_tensors="pt").to(model.device)
         
         # Generate the response
         generated_ids = model.generate(
             inputs.input_ids,
-            max_new_tokens=512,  # Adjust as needed
+            max_new_tokens=5000,  # Adjust as needed
             temperature=0.7,      # Lower values make the output more deterministic
             top_k=50,             # Lower k focuses on higher probability tokens
             top_p=0.95,           # Lower values make the output more focused

@@ -3,7 +3,6 @@ FROM python:3.9-slim
 
 # Install system dependencies
 RUN apt-get update && apt-get install -y \
-    build-essential \
     libopenblas-dev \
     && rm -rf /var/lib/apt/lists/*
 
@@ -15,14 +14,16 @@ RUN pip install --no-cache-dir \
     fastapi \
     pydantic \
     accelerate \
-    sentencepiece \
-    protobuf==3.20.*
+    google-cloud-storage
+
+# Set working directory
+WORKDIR /app
 
 # Copy the inference script
-COPY app.py /app.py
+COPY app.py .
 
 # Set environment variables
-ENV MODEL_ID=mistralai/Mistral-7B-Instruct-v0.3
+ENV MODEL_DIR=/gcs/{{bucket_name}}/model_weights
 ENV PORT=8080
 
 # Expose the port
