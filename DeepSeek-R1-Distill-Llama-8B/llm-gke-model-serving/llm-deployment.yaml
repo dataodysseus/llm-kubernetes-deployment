@@ -20,10 +20,10 @@ spec:
         resources:
           requests:
             cpu: "2"
-            memory: "8Gi"
+            memory: "16Gi"
           limits:
             cpu: "4"
-            memory: "16Gi"
+            memory: "32Gi"
         env:
         - name: MODEL_DIR
           value: "/app/model_weights"
