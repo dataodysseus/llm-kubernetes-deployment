@@ -115,18 +115,10 @@ jobs:
         run: |
           if ! kubectl get namespace gke-ai-namespace >/dev/null 2>&1; then
             kubectl create namespace gke-ai-namespace
+            kubectl create serviceaccount gpu-k8s-sa --namespace=gke-ai-namespace
             echo "Namespace 'gke-ai-namespace' created."
           else
             echo "Namespace 'gke-ai-namespace' already exists. Skipping."
-          fi
-
-      - name: Create a Kubernetes ServiceAccount in the namespace if it does not exist
-        run: |
-          if ! kubectl get serviceaccount gpu-k8s-sa >/dev/null 2>&1; then
-            kubectl create serviceaccount gpu-k8s-sa --namespace=gke-ai-namespace
-            echo "serviceaccount 'gpu-k8s-s' created."
-          else
-            echo "serviceaccount 'gpu-k8s-s' already exists. Skipping."
           fi
 
       - name: Add an IAM binding to the Google Cloud service account
