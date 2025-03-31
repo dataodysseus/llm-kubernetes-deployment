@@ -23,6 +23,11 @@ on:
         required: true
         default: 'llm-test-bucket-2025'
         type: string        
+      folder_name:
+        description: 'GCS folder name'
+        required: true
+        default: 'model_weights'
+        type: string     
 
 jobs:
   deploy:
@@ -86,7 +91,8 @@ jobs:
           export REGION=${{ secrets.GCP_REGION }}
           export model_image=${{ inputs.model_image }}
           export llm_model=${{ inputs.llm_model }}
-          export llm_model=${{ inputs.bucket_name }}
+          export bucket_name=${{ inputs.bucket_name }}
+          export folder_name=${{ inputs.folder_name }}
 
           cd ${{ inputs.llm_model }}/llm-gke-model-serving
           sed -i "s|{{PROJECT_ID}}|$PROJECT_ID|g" llm-deployment.yaml
@@ -96,6 +102,9 @@ jobs:
           sed -i "s|{{llm_model}}|$llm_model|g" llm-deployment.yaml  
           sed -i "s|{{bucket_name}}|$bucket_name|g" llm-deployment.yaml  
           sed -i "s|{{bucket_name}}|$bucket_name|g" Dockerfile  
+          sed -i "s|{{folder_name}}|$folder_name|g" llm-deployment.yaml      
+          sed -i "s|{{folder_name}}|$folder_name|g" Dockerfile         
+          sed -i "s|{{folder_name}}|$folder_name|g" app.py  
 
       - name: Deploy Image to GKE
         run: |

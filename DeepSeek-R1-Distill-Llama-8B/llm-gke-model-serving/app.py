@@ -8,7 +8,7 @@ import torch
 app = FastAPI()
 
 # Load the model and tokenizer
-MODEL_DIR = os.getenv("MODEL_DIR", "/app/model_weights")
+MODEL_DIR = os.getenv("MODEL_DIR", "/app/{{folder_name}}")
 tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR)
 model = AutoModelForCausalLM.from_pretrained(
     MODEL_DIR, 

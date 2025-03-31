@@ -26,13 +26,13 @@ spec:
             memory: "32Gi"
         env:
         - name: MODEL_DIR
-          value: "/app/model_weights"
+          value: "/app/{{folder_name}}"
         - name: PORT
           value: "8080"
         ports:
         - containerPort: 8080
         volumeMounts:
-        - mountPath: "/app/model_weights"
+        - mountPath: "/app/{{folder_name}}"
           name: gcsfuse-volume
       volumes:
       - name: gcsfuse-volume
