@@ -41,3 +41,5 @@ spec:
           volumeAttributes:
             bucketName: {{bucket_name}}
             mountOptions: "implicit-dirs"
+          persistentVolumeClaim:
+            claimName: gcsfuse-pvc  # This must match the PVC name  

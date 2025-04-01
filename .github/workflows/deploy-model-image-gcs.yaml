@@ -61,10 +61,6 @@ jobs:
           export REGION=${{ secrets.GCP_REGION }}
           gcloud auth configure-docker $REGION-docker.pkg.dev
 
-      - name: Set Working Directory
-        run: |
-          cd ${{ inputs.llm_model }}/llm-gke-model-serving
-
       - name: Create and Push Docker Image
         run: |
           export PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
@@ -115,3 +111,12 @@ jobs:
         run: |
           cd ${{ inputs.llm_model }}/llm-gke-model-serving
           kubectl apply -f llm-service.yaml      
+
+      - name: Deploy PVC to GKE
+        run: |
+          cd ${{ inputs.llm_model }}/llm-gke-model-serving
+          kubectl apply -f pvc.yaml     
+
+      - name: Get GKE Credentials
+        run: |
+          gcloud container clusters describe ${{ inputs.cluster_name }} --region ${{ secrets.GCP_REGION }} | grep -i gcsfuse 
