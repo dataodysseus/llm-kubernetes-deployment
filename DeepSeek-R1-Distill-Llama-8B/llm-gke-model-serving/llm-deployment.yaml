@@ -36,8 +36,6 @@ spec:
           name: gcsfuse-volume
       volumes:
       - name: gcsfuse-volume
-        persistentVolumeClaim:
-          claimName: gcsfuse-pvc  # This must match the PVC name  
         csi:
           driver: gcsfuse.csi.storage.gke.io
           volumeAttributes:
