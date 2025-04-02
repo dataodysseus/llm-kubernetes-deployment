@@ -34,6 +34,17 @@ spec:
         volumeMounts:
         - mountPath: "/app/{{folder_name}}"
           name: gcsfuse-volume
+      # Add the gcsfuse sidecar container
+      - name: gcsfuse
+        image: gcr.io/cloud-solutions-images/gcsfuse-csi:v1.0.2
+        imagePullPolicy: Always
+        securityContext:
+          privileged: true
+        command: ["/bin/sh"]
+        args: ["-c", "while true; do sleep 1; done"]
+        volumeMounts:
+        - mountPath: "/gcsfuse-tmp"
+          name: gcsfuse-tmp
       volumes:
       - name: gcsfuse-volume
         csi:
@@ -41,3 +52,6 @@ spec:
           volumeAttributes:
             bucketName: {{bucket_name}}
             mountOptions: "implicit-dirs"
+      # Add temporary volume for sidecar
+      - name: gcsfuse-tmp
+        emptyDir: {}
