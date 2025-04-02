@@ -38,21 +38,6 @@ spec:
         - mountPath: "/app/{{folder_name}}"
           name: gcsfuse-volume
           readOnly: false
-      # Updated GCSFuse sidecar container
-      - name: gcsfuse
-        image: gcr.io/gke-release/gcsfuse/csi-sidecar:v0.2.4-gke.0
-        imagePullPolicy: Always
-        securityContext:
-          privileged: true
-        command: ["/bin/sleep"]
-        args: ["infinity"]
-        resources:
-          limits:
-            cpu: "500m"
-            memory: "500Mi"
-        volumeMounts:
-        - mountPath: "/gcsfuse-tmp"
-          name: gcsfuse-tmp
       volumes:
       - name: gcsfuse-volume
         csi:
