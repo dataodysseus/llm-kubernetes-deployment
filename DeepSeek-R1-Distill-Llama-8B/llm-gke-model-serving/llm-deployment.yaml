@@ -12,8 +12,11 @@ spec:
     metadata:
       labels:
         app: llm
+      annotations:
+        gke-gcsfuse/volumes: "true"  # Important annotation
     spec:
       serviceAccountName: gpu-k8s-sa
+      # Main application container
       containers:
       - name: llm
         image: {{REGION}}-docker.pkg.dev/{{PROJECT_ID}}/{{ARTIFACT_REGISTRY}}/{{model_image}}-cpu-inference:latest
@@ -34,14 +37,15 @@ spec:
         volumeMounts:
         - mountPath: "/app/{{folder_name}}"
           name: gcsfuse-volume
-      # Add the gcsfuse sidecar container
+          readOnly: false
+      # GCSFuse sidecar container (must be named 'gcsfuse')
       - name: gcsfuse
         image: gcr.io/cloud-solutions-images/gcsfuse-csi:v1.0.2
         imagePullPolicy: Always
         securityContext:
           privileged: true
-        command: ["/bin/sh"]
-        args: ["-c", "while true; do sleep 1; done"]
+        command: ["/bin/sleep"]
+        args: ["infinity"]
         volumeMounts:
         - mountPath: "/gcsfuse-tmp"
           name: gcsfuse-tmp
@@ -51,7 +55,6 @@ spec:
           driver: gcsfuse.csi.storage.gke.io
           volumeAttributes:
             bucketName: {{bucket_name}}
-            mountOptions: "implicit-dirs"
-      # Add temporary volume for sidecar
+            mountOptions: "implicit-dirs,uid=1000,gid=1000"  # Added UID/GID
       - name: gcsfuse-tmp
         emptyDir: {}
