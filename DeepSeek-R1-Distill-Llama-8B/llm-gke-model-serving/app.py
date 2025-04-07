@@ -1,20 +1,43 @@
-# app.py
 import os
+import json
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-from transformers import AutoModelForCausalLM, AutoTokenizer
+from transformers import AutoModelForCausalLM, AutoTokenizer, AutoConfig
 import torch
 
 app = FastAPI()
 
-# Load the model and tokenizer
-MODEL_DIR = os.getenv("MODEL_DIR", "/app/{{folder_name}}")
-tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR)
-model = AutoModelForCausalLM.from_pretrained(
-    MODEL_DIR, 
-    torch_dtype=torch.float16, 
-    device_map="auto"
-)
+MODEL_DIR = os.getenv("MODEL_DIR", "/app/model_weights")
+
+# Improved model loading with verification
+try:
+    # First verify we can access the model files
+    print("Contents of model directory:", os.listdir(MODEL_DIR))
+    
+    # Load config separately to verify
+    config_path = os.path.join(MODEL_DIR, "config.json")
+    with open(config_path, "r") as f:
+        config = json.load(f)
+    print("Model config:", config)
+    
+    # Check for required model_type
+    if "model_type" not in config:
+        raise ValueError("config.json is missing required 'model_type' field")
+    
+    # Load tokenizer and model
+    tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR)
+    model = AutoModelForCausalLM.from_pretrained(
+        MODEL_DIR,
+        torch_dtype=torch.float16,
+        device_map="auto"
+    )
+    print("Model and tokenizer loaded successfully!")
+    
+except Exception as e:
+    print(f"Error loading model: {str(e)}")
+    raise
+
+# Rest of your existing code...
 
 # Define request format
 class MessagesRequest(BaseModel):

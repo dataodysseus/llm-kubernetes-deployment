@@ -45,5 +45,3 @@ spec:
           volumeAttributes:
             bucketName: {{bucket_name}}
             mountOptions: "implicit-dirs,uid=1000,gid=1000"
-      - name: gcsfuse-tmp
-        emptyDir: {}
