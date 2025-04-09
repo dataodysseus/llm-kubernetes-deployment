@@ -16,7 +16,14 @@ spec:
         gke-gcsfuse/volumes: "true"  # Required annotation
     spec:
       serviceAccountName: gpu-k8s-sa
-      # Main application container
+      initContainers:
+      - name: verify-mount
+        image: busybox
+        command: ['sh', '-c', 'echo "Waiting for GCS mount..."; while [ ! -f /app/model_weights/config.json ]; do sleep 1; done; echo "Found config.json"']
+      volumeMounts:
+      - name: gcsfuse-volume
+        mountPath: /app/model_weights     
+    # Main application container
       containers:
       - name: llm
         image: {{REGION}}-docker.pkg.dev/{{PROJECT_ID}}/{{ARTIFACT_REGISTRY}}/{{model_image}}-cpu-inference:latest
