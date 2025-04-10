@@ -23,7 +23,6 @@ WORKDIR /app
 COPY app.py .
 
 # Set environment variables
-ENV MODEL_DIR=/app/{{folder_name}}
 ENV PORT=8080
 
 # Expose the port

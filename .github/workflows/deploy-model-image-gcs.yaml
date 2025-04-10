@@ -91,26 +91,26 @@ jobs:
           export folder_name=${{ inputs.folder_name }}
 
           cd ${{ inputs.llm_model }}/llm-gke-model-serving
-          sed -i "s|{{PROJECT_ID}}|$PROJECT_ID|g" llm-deployment.yaml
-          sed -i "s|{{ARTIFACT_REGISTRY}}|$ARTIFACT_REGISTRY|g" llm-deployment.yaml
-          sed -i "s|{{REGION}}|$REGION|g" llm-deployment.yaml
-          sed -i "s|{{model_image}}|$model_image|g" llm-deployment.yaml          
-          sed -i "s|{{llm_model}}|$llm_model|g" llm-deployment.yaml  
-          sed -i "s|{{bucket_name}}|$bucket_name|g" llm-deployment.yaml  
+          sed -i "s|{{PROJECT_ID}}|$PROJECT_ID|g" llm-deployment-gcs.yaml
+          sed -i "s|{{ARTIFACT_REGISTRY}}|$ARTIFACT_REGISTRY|g" llm-deployment-gcs.yaml
+          sed -i "s|{{REGION}}|$REGION|g" llm-deployment-gcs.yaml
+          sed -i "s|{{model_image}}|$model_image|g" llm-deployment-gcs.yaml          
+          sed -i "s|{{llm_model}}|$llm_model|g" llm-deployment-gcs.yaml  
+          sed -i "s|{{bucket_name}}|$bucket_name|g" llm-deployment-gcs.yaml  
           sed -i "s|{{bucket_name}}|$bucket_name|g" Dockerfile  
-          sed -i "s|{{folder_name}}|$folder_name|g" llm-deployment.yaml      
+          sed -i "s|{{folder_name}}|$folder_name|g" llm-deployment-gcs.yaml      
           sed -i "s|{{folder_name}}|$folder_name|g" Dockerfile         
           sed -i "s|{{folder_name}}|$folder_name|g" app.py  
 
       - name: Deploy Image to GKE
         run: |
           cd ${{ inputs.llm_model }}/llm-gke-model-serving
-          kubectl apply -f llm-deployment.yaml
+          kubectl apply -f llm-deployment-gcs.yaml
 
       - name: Deploy LLM Service to GKE
         run: |
           cd ${{ inputs.llm_model }}/llm-gke-model-serving
-          kubectl apply -f llm-service.yaml      
+          kubectl apply -f llm-service-gcs.yaml      
 
       - name: Deploy PVC to GKE
         run: |

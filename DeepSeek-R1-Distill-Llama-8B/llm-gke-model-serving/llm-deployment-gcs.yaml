@@ -1,0 +1,50 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: llm-deployment
+  labels:
+    app: llm-server
+spec:
+  selector:
+    matchLabels:
+      app: llm
+  replicas: 1
+  template:
+    metadata:
+      labels:
+        app: llm
+      annotations:
+        gke-gcsfuse/volumes: "true"
+    spec:
+      # nodeSelector:
+      #   cloud.google.com/gke-accelerator: "nvidia-l4"
+      containers:
+      - name: llm-server
+        image: {{REGION}}-docker.pkg.dev/{{PROJECT_ID}}/{{ARTIFACT_REGISTRY}}/{{model_image}}-cpu-inference:latest
+        ports:
+        - containerPort: 8080
+        resources:
+          limits:
+            cpu: "4"
+            memory: "16Gi"
+            ephemeral-storage: "1Gi"
+            # nvidia.com/gpu: 1
+          requests:
+            cpu: "4"
+            memory: "16Gi"
+            ephemeral-storage: "1Gi"
+            # nvidia.com/gpu: 1
+        volumeMounts:
+        - name: gcs-fuse-csi-vol
+          mountPath: /data
+          readOnly: true
+      serviceAccountName: gpu-k8s-sa
+      volumes:
+      - name: gcs-fuse-csi-vol
+        csi:
+          driver: gcsfuse.csi.storage.gke.io
+          readOnly: true
+          volumeAttributes:
+            bucketName: {{bucket_name}}
+            mountOptions: "implicit-dirs"
+        

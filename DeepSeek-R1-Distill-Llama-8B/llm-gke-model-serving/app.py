@@ -7,23 +7,10 @@ import torch
 
 app = FastAPI()
 
-MODEL_DIR = os.getenv("MODEL_DIR", "/app/model_weights")
+MODEL_DIR = "/data/model_weights"
 
 # Improved model loading with verification
 try:
-    # First verify we can access the model files
-    print("Contents of model directory:", os.listdir(MODEL_DIR))
-    
-    # Load config separately to verify
-    config_path = os.path.join(MODEL_DIR, "config.json")
-    with open(config_path, "r") as f:
-        config = json.load(f)
-    print("Model config:", config)
-    
-    # Check for required model_type
-    if "model_type" not in config:
-        raise ValueError("config.json is missing required 'model_type' field")
-    
     # Load tokenizer and model
     tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR)
     model = AutoModelForCausalLM.from_pretrained(
@@ -31,8 +18,7 @@ try:
         torch_dtype=torch.float16,
         device_map="auto"
     )
-    print("Model and tokenizer loaded successfully!")
-    
+    print("Model and tokenizer loaded successfully!")  
 except Exception as e:
     print(f"Error loading model: {str(e)}")
     raise
