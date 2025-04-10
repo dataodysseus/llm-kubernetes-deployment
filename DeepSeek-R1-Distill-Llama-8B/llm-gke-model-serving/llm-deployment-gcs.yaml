@@ -1,9 +1,10 @@
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: llm-deployment
+  name: llm
+  namespace: gke-ai-namespace  
   labels:
-    app: llm-server
+    app: llm
 spec:
   selector:
     matchLabels:
