@@ -1,6 +1,5 @@
 import requests
 import gradio as gr
-from IPython.display import HTML, display
 
 url = "http://llm-service"
 
