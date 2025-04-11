@@ -20,7 +20,7 @@ spec:
       # nodeSelector:
       #   cloud.google.com/gke-accelerator: "nvidia-l4"
       containers:
-      - name: llm-server
+      - name: llm
         image: {{REGION}}-docker.pkg.dev/{{PROJECT_ID}}/{{ARTIFACT_REGISTRY}}/{{model_image}}-cpu-inference:latest
         ports:
         - containerPort: 8080
