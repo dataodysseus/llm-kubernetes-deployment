@@ -110,12 +110,7 @@ jobs:
       - name: Deploy LLM Service to GKE
         run: |
           cd ${{ inputs.llm_model }}/llm-gke-model-serving
-          kubectl apply -f llm-service-gcs.yaml      
-
-      - name: Deploy PVC to GKE
-        run: |
-          cd ${{ inputs.llm_model }}/llm-gke-model-serving
-          kubectl apply -f pvc.yaml     
+          kubectl apply -f llm-service-gcs.yaml       
 
       - name: Get GKE Credentials
         run: |
