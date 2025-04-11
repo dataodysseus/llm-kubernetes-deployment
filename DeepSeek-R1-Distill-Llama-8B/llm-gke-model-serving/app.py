@@ -10,21 +10,13 @@ app = FastAPI()
 MODEL_FOLDER = os.getenv("MODEL_FOLDER_NAME")
 MODEL_DIR = f"/data/{MODEL_FOLDER}"
 
-# Improved model loading with verification
-try:
-    # Load tokenizer and model
-    tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR)
-    model = AutoModelForCausalLM.from_pretrained(
-        MODEL_DIR,
-        torch_dtype=torch.float16,
-        device_map="auto"
-    )
-    print("Model and tokenizer loaded successfully!")  
-except Exception as e:
-    print(f"Error loading model: {str(e)}")
-    raise
-
-# Rest of your existing code...
+# Load tokenizer and model
+tokenizer = AutoTokenizer.from_pretrained(MODEL_DIR)
+model = AutoModelForCausalLM.from_pretrained(
+    MODEL_DIR,
+    torch_dtype=torch.float16,
+    device_map="auto"
+)
 
 # Define request format
 class MessagesRequest(BaseModel):
