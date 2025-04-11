@@ -39,6 +39,9 @@ spec:
         - name: gcs-fuse-csi-vol
           mountPath: /data
           readOnly: true
+        env:
+        - name: MODEL_FOLDER_NAME
+          value: {{folder_name}}
       serviceAccountName: gpu-k8s-sa
       volumes:
       - name: gcs-fuse-csi-vol

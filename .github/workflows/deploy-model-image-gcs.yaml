@@ -97,10 +97,7 @@ jobs:
           sed -i "s|{{model_image}}|$model_image|g" llm-deployment-gcs.yaml          
           sed -i "s|{{llm_model}}|$llm_model|g" llm-deployment-gcs.yaml  
           sed -i "s|{{bucket_name}}|$bucket_name|g" llm-deployment-gcs.yaml  
-          sed -i "s|{{bucket_name}}|$bucket_name|g" Dockerfile  
           sed -i "s|{{folder_name}}|$folder_name|g" llm-deployment-gcs.yaml      
-          sed -i "s|{{folder_name}}|$folder_name|g" Dockerfile         
-          sed -i "s|{{folder_name}}|$folder_name|g" app.py  
 
       - name: Deploy Image to GKE
         run: |

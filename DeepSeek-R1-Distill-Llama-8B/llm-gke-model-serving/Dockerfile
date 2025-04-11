@@ -14,8 +14,7 @@ RUN pip install --no-cache-dir \
     fastapi \
     pydantic \
     accelerate \
-    google-cloud-storage \
-    bitsandbytes
+    google-cloud-storage
 
 # Set working directory
 WORKDIR /app

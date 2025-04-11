@@ -7,7 +7,8 @@ import torch
 
 app = FastAPI()
 
-MODEL_DIR = "/data/model_weights"
+MODEL_FOLDER = os.getenv("MODEL_FOLDER_NAME")
+MODEL_DIR = f"/data/{MODEL_FOLDER}"
 
 # Improved model loading with verification
 try:
