@@ -94,6 +94,11 @@ jobs:
           cd ${{ inputs.llm_model }}/llm-gradio-app
           kubectl apply --namespace=gke-ai-namespace -f gradio-deployment.yaml
 
+      - name: Test POD Deployment
+        run: |
+          cd ${{ inputs.llm_model }}/llm-gradio-app
+          kubectl apply --namespace=gke-ai-namespace -f test-pod-deployment.yaml          
+
       - name: Wait for External IP
         run: |
           echo "Waiting for External IP..."

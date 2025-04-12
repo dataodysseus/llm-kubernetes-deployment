@@ -17,6 +17,9 @@ spec:
         image: {{REGION}}-docker.pkg.dev/{{PROJECT_ID}}/{{ARTIFACT_REGISTRY}}/{{model_image}}-gradio-app:latest
         ports:
         - containerPort: 7860
+        env:
+        - name: LLM_SERVICE_URL
+          value: "http://llm-service.gke-ai-namespace.svc.cluster.local"
 ---
 apiVersion: v1
 kind: Service

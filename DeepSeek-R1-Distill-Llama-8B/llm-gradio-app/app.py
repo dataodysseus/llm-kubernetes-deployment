@@ -1,7 +1,8 @@
+import os
 import requests
 import gradio as gr
 
-url = "http://llm-service"
+url = os.getenv("LLM_SERVICE_URL", "http://llm-service")
 
 def generate_response(user_input):
     payload = {
