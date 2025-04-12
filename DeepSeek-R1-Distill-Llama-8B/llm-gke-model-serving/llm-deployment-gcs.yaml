@@ -25,13 +25,13 @@ spec:
         - containerPort: 8080
         resources:
           limits:
-            cpu: "8"
-            memory: "32Gi"
+            cpu: "16"
+            memory: "64Gi"
             ephemeral-storage: "1Gi"
             # nvidia.com/gpu: 1
           requests:
-            cpu: "4"
-            memory: "16Gi"
+            cpu: "8"
+            memory: "32Gi"
             ephemeral-storage: "1Gi"
             # nvidia.com/gpu: 1
         volumeMounts:
