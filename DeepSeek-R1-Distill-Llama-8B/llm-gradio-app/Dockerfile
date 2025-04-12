@@ -2,7 +2,7 @@
 FROM python:3.9-slim
 
 # Install dependencies
-RUN pip install --no-cache-dir gradio requests
+RUN pip install -y curl --no-cache-dir gradio requests
 
 # Copy the Gradio app code
 COPY app.py /app.py
