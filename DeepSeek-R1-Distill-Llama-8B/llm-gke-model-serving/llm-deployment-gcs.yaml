@@ -2,7 +2,6 @@ apiVersion: apps/v1
 kind: Deployment
 metadata:
   name: llm
-  namespace: gke-ai-namespace  
   labels:
     app: llm
 spec:
