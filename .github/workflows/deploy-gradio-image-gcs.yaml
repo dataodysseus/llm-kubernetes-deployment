@@ -92,7 +92,7 @@ jobs:
       - name: Deploy Image to GKE
         run: |
           cd ${{ inputs.llm_model }}/llm-gradio-app
-          kubectl apply -f gradio-deployment.yaml
+          kubectl apply --namespace=gke-ai-namespace -f gradio-deployment.yaml
 
       - name: Wait for External IP
         run: |

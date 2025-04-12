@@ -109,22 +109,6 @@ jobs:
           cd ${{ inputs.llm_model }}/llm-gke-model-serving
           kubectl apply --namespace=gke-ai-namespace -f llm-service-gcs.yaml       
 
-      - name: Check the external IP is assigned
+      - name: Check the Cluster IP is assigned
         run: |
-          kubectl get services --namespace=gke-ai-namespace
-
-      - name: Wait for External IP
-        run: |
-          echo "Waiting for External IP..."
-          for i in {1..10}; do
-            EXTERNAL_IP=$(kubectl --namespace=gke-ai-namespace get svc llm-service -o=jsonpath='{.status.loadBalancer.ingress[0].ip}')
-            if [[ -n "$EXTERNAL_IP" ]]; then
-              echo "External IP assigned: $EXTERNAL_IP"
-              echo "Access the Gradio app at: http://$EXTERNAL_IP"
-              exit 0
-            fi
-            echo "External IP not assigned yet. Retrying in 30 seconds..."
-            sleep 30
-          done
-          echo "ERROR: Timed out waiting for External IP."
-          exit 1          
+          kubectl get services --namespace=gke-ai-namespace      
