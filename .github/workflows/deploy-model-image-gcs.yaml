@@ -102,13 +102,13 @@ jobs:
       - name: Deploy Image to GKE
         run: |
           cd ${{ inputs.llm_model }}/llm-gke-model-serving
-          kubectl apply -f llm-deployment-gcs.yaml
+          kubectl apply --namespace=gke-ai-namespace -f llm-deployment-gcs.yaml
 
       - name: Deploy LLM Service to GKE
         run: |
           cd ${{ inputs.llm_model }}/llm-gke-model-serving
-          kubectl apply -f llm-service-gcs.yaml       
+          kubectl apply --namespace=gke-ai-namespace -f llm-service-gcs.yaml       
 
-      - name: Get GKE Credentials
+      - name: Check the external IP is assigned
         run: |
-          gcloud container clusters describe ${{ inputs.cluster_name }} --region ${{ secrets.GCP_REGION }} | grep -i gcsfuse 
+          kubectl get services --namespace=gke-ai-namespace
