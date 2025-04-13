@@ -10,5 +10,9 @@ COPY app.py /app.py
 # Expose the port
 EXPOSE 7860
 
+ENV LLM_SERVICE_URL="http://llm-service.gke-ai-namespace.svc.cluster.local"
+
 # Run the app
 CMD ["python", "/app.py"]
+
+
