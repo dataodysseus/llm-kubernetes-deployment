@@ -83,16 +83,16 @@ jobs:
           export llm_model=${{ inputs.llm_model }}
 
           cd ${{ inputs.llm_model }}/llm-gradio-app
-          sed -i "s|{{PROJECT_ID}}|$PROJECT_ID|g" gradio-deployment.yaml
-          sed -i "s|{{ARTIFACT_REGISTRY}}|$ARTIFACT_REGISTRY|g" gradio-deployment.yaml
-          sed -i "s|{{REGION}}|$REGION|g" gradio-deployment.yaml
-          sed -i "s|{{model_image}}|$model_image|g" gradio-deployment.yaml         
-          sed -i "s|{{llm_model}}|$llm_model|g" gradio-deployment.yaml  
+          sed -i "s|{{PROJECT_ID}}|$PROJECT_ID|g" gradio-deployment-gcs.yaml
+          sed -i "s|{{ARTIFACT_REGISTRY}}|$ARTIFACT_REGISTRY|g" gradio-deployment-gcs-gcs.yaml
+          sed -i "s|{{REGION}}|$REGION|g" gradio-deployment-gcs.yaml
+          sed -i "s|{{model_image}}|$model_image|g" gradio-deployment-gcs.yaml         
+          sed -i "s|{{llm_model}}|$llm_model|g" gradio-deployment-gcs.yaml  
 
       - name: Apply Deployment Manifest
         run: |
           cd ${{ inputs.llm_model }}/llm-gradio-app
-          kubectl apply -f gradio-deployment-gcs.yaml -n gke-ai-namespace  
+          kubectl apply -f gradio-deployment-gcs-gcs.yaml -n gke-ai-namespace  
 
       - name: Apply Service Manifest
         run: |
