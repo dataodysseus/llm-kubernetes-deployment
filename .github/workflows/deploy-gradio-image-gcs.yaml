@@ -6,12 +6,12 @@ on:
       llm_model:
         description: 'Model name for deployment'
         required: true
-        default: 'Mistral-7B-Instruct-v0.3'
+        default: 'DeepSeek-R1-Distill-Llama-8B'
         type: string
       model_image:
         description: 'Model image name for deployment'
         required: true
-        default: 'mistralai'
+        default: 'deepseek-ai'
         type: string
       cluster_name:
         description: 'Cluster name'
