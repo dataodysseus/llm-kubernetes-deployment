@@ -89,16 +89,21 @@ jobs:
           sed -i "s|{{model_image}}|$model_image|g" gradio-deployment.yaml         
           sed -i "s|{{llm_model}}|$llm_model|g" gradio-deployment.yaml  
 
-      - name: Deploy Image to GKE
+      - name: Apply Deployment Manifest
         run: |
           cd ${{ inputs.llm_model }}/llm-gradio-app
-          kubectl apply --namespace=gke-ai-namespace -f gradio-deployment.yaml        
+          kubectl apply -f gradio-deployment-gcs.yaml -n gke-ai-namespace  
+
+      - name: Apply Service Manifest
+        run: |
+          cd ${{ inputs.llm_model }}/llm-gradio-app
+          kubectl apply -f gradio-service-gcs.yaml -n gke-ai-namespace                
 
       - name: Wait for External IP
         run: |
           echo "Waiting for External IP..."
           for i in {1..10}; do
-            EXTERNAL_IP=$(kubectl --namespace=gke-ai-namespace get svc gradio-service -o=jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            EXTERNAL_IP=$(kubectl --namespace=gke-ai-namespace get svc gradio-app-service -o=jsonpath='{.status.loadBalancer.ingress[0].ip}')
             if [[ -n "$EXTERNAL_IP" ]]; then
               echo "External IP assigned: $EXTERNAL_IP"
               echo "Access the Gradio app at: http://$EXTERNAL_IP"

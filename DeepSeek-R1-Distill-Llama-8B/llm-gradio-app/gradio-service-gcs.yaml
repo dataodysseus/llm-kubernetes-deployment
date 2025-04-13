@@ -1,0 +1,13 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: gradio-app-service
+  namespace: gke-ai-namespace 
+spec:
+  selector:
+    app: gradio-app 
+  type: LoadBalancer
+  ports:
+    - protocol: TCP
+      port: 80 
+      targetPort: 7860 
