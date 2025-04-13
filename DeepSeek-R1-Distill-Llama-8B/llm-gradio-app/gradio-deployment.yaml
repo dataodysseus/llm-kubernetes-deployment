@@ -19,7 +19,7 @@ spec:
         - containerPort: 7860
         env:
         - name: LLM_SERVICE_URL
-          value: "http://llm-service"
+          value: "http://llm-service.gke-ai-namespace.svc.cluster.local"
 ---
 apiVersion: v1
 kind: Service
