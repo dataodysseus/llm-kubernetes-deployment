@@ -6,7 +6,7 @@ on:
       cluster_name:
         description: 'Cluster name'
         required: true
-        default: 'llm-deploy-gpu'
+        default: 'llm-deploy-cpu'
         type: string
       cpu_machine_type:
         description: 'CPU Machine type'
@@ -132,5 +132,3 @@ jobs:
           kubectl annotate serviceaccount gpu-k8s-sa \
               --namespace gke-ai-namespace \
               iam.gke.io/gcp-service-account=${{ secrets.GCP_SERVICE_ACCOUNT }}
-
-
