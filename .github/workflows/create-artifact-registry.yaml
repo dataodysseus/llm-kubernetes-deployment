@@ -14,7 +14,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: 'read'
-      id-token: 'write'  # Required for Workload Identity Federation
+      id-token: 'write'
 
     steps:
       - name: Checkout code
@@ -39,15 +39,22 @@ jobs:
 
       - name: Check if Artifact Registry exists and create if not
         run: |
+          # Store the input in a variable
+          REGISTRY_NAME="${{ github.event.inputs.registry_name }}"
+          GCP_REGION="${{ secrets.GCP_REGION }}"
+          GCP_PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
+          
           # Check if the repository exists
-          if ! gcloud artifacts repositories describe ${{ inputs.registry_name }} --location=${{ secrets.GCP_REGION }} --project=${{ secrets.GCP_PROJECT_ID }} >/dev/null 2>&1; then
-            echo "Artifact Registry repository '${REPOSITORY_NAME}' does not exist in ${{ secrets.GCP_REGION }}. Creating..."
-            gcloud artifacts repositories create "${REPOSITORY_NAME}" \
-              --repository-format="DOCKER" \
-              --location=${{ secrets.GCP_REGION }} \
-              --project=${{ secrets.GCP_PROJECT_ID }} \
+          if ! gcloud artifacts repositories describe "$REGISTRY_NAME" \
+              --location="$GCP_REGION" \
+              --project="$GCP_PROJECT_ID" >/dev/null 2>&1; then
+            echo "Artifact Registry repository '$REGISTRY_NAME' does not exist in $GCP_REGION. Creating..."
+            gcloud artifacts repositories create "$REGISTRY_NAME" \
+              --repository-format=docker \
+              --location="$GCP_REGION" \
+              --project="$GCP_PROJECT_ID" \
               --description="Docker image repository created by GitHub Actions"
-            echo "Successfully created Docker Artifact Registry repository: ${REPOSITORY_NAME} in ${{ secrets.GCP_REGION }} for project ${{ secrets.GCP_PROJECT_ID }}"
+            echo "Successfully created Docker Artifact Registry repository: $REGISTRY_NAME in $GCP_REGION for project $GCP_PROJECT_ID"
           else
-            echo "Artifact Registry repository '${REPOSITORY_NAME}' already exists in ${{ secrets.GCP_REGION }}. Skipping creation."
+            echo "Artifact Registry repository '$REGISTRY_NAME' already exists in $GCP_REGION. Skipping creation."
           fi
