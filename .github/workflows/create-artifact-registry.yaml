@@ -40,7 +40,7 @@ jobs:
       - name: Check if Artifact Registry exists and create if not
         run: |
           # Check if the repository exists
-          if ! gcloud artifacts repositories describe ${{ inputs.cluster_name }} --location=${{ secrets.GCP_REGION }} --project=${{ secrets.GCP_PROJECT_ID }} >/dev/null 2>&1; then
+          if ! gcloud artifacts repositories describe ${{ inputs.registry_name }} --location=${{ secrets.GCP_REGION }} --project=${{ secrets.GCP_PROJECT_ID }} >/dev/null 2>&1; then
             echo "Artifact Registry repository '${REPOSITORY_NAME}' does not exist in ${{ secrets.GCP_REGION }}. Creating..."
             gcloud artifacts repositories create "${REPOSITORY_NAME}" \
               --repository-format="DOCKER" \
