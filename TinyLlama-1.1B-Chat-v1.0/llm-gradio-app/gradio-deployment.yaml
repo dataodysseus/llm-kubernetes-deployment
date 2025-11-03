@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: gradio
-        image: {{REGION}}-docker.pkg.dev/{{PROJECT_ID}}/{{ARTIFACT_REGISTRY}}/gradio-app:latest
+        image: {{REGION}}-docker.pkg.dev/{{PROJECT_ID}}/{{ARTIFACT_REGISTRY}}/{{model_image}}-gradio-app:latest
         ports:
         - containerPort: 7860
 ---
