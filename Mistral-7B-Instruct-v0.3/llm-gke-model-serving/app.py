@@ -16,12 +16,14 @@ if not HUGGING_FACE_HUB_TOKEN:
 # Load the model and tokenizer
 MODEL_ID = "mistralai/Mistral-7B-Instruct-v0.3"
 tokenizer = AutoTokenizer.from_pretrained(MODEL_ID, token=HUGGING_FACE_HUB_TOKEN)
+
 model = AutoModelForCausalLM.from_pretrained(
-    MODEL_ID, 
-    torch_dtype=torch.float16, 
-    device_map="auto", 
+    MODEL_ID,
+    dtype=torch.bfloat16,
+    device_map="auto",
     token=HUGGING_FACE_HUB_TOKEN
 )
+
 
 # Define request format
 class MessagesRequest(BaseModel):
