@@ -1,0 +1,86 @@
+name: Deploy ML Model Image (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      cluster_name:
+        description: 'Cluster name'
+        required: true
+        default: 'llm-deploy-cpu'
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'  # Required for Workload Identity Federation
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Authenticate with Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+          workload_identity_provider: "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}"
+          service_account: "${{ secrets.GCP_SERVICE_ACCOUNT }}"
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+
+      - name: Enable Required Services
+        run: |
+          gcloud services enable container.googleapis.com artifactregistry.googleapis.com
+
+      - name: Configure Docker to Authenticate with Google Artifact Registry
+        run: |
+          export REGION=${{ secrets.GCP_REGION }}
+          gcloud auth configure-docker $REGION-docker.pkg.dev
+
+      - name: Set Working Directory
+        run: |
+          cd ml-model-serving/regression-gke-model-serving
+
+      - name: Create and Push Docker Image
+        run: |
+          export PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
+          export ARTIFACT_REGISTRY=${{ secrets.GCP_ARTIFACT_REGISTRY }}
+          export REGION=${{ secrets.GCP_REGION }}
+
+          cd ml-model-serving/regression-gke-model-serving
+          docker build -t $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY/ml-model-serving:latest .
+          docker push $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY/ml-model-serving:latest
+
+      - name: Get GKE Credentials
+        run: |
+          gcloud container clusters get-credentials ${{ inputs.cluster_name }} --region ${{ secrets.GCP_REGION }} --project ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Install gke-gcloud-auth-plugin
+        run: |
+          gcloud components install gke-gcloud-auth-plugin
+          export USE_GKE_GCLOUD_AUTH_PLUGIN=True
+
+      - name: Prepare Kubernetes Deployment Manifest
+        run: |
+          export PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
+          export ARTIFACT_REGISTRY=${{ secrets.GCP_ARTIFACT_REGISTRY }}
+          export REGION=${{ secrets.GCP_REGION }}
+
+          cd ml-model-serving/regression-gke-model-serving
+          sed -i "s|{{PROJECT_ID}}|$PROJECT_ID|g" ml-deployment.yaml
+          sed -i "s|{{ARTIFACT_REGISTRY}}|$ARTIFACT_REGISTRY|g" ml-deployment.yaml
+          sed -i "s|{{REGION}}|$REGION|g" ml-deployment.yaml
+
+      - name: Deploy Image to GKE
+        run: |
+          cd ml-model-serving/regression-gke-model-serving
+          kubectl apply -f ml-deployment.yaml
+
+      - name: Deploy ML Service to GKE
+        run: |
+          cd ml-model-serving/regression-gke-model-serving
+          kubectl apply -f ml-service.yaml
