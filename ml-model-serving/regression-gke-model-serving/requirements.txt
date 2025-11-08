@@ -1,0 +1,6 @@
+fastapi==0.104.1
+gradio==4.8.0
+scikit-learn==1.3.2
+joblib==1.3.2
+uvicorn[standard]==0.24.0
+numpy==1.26.2
