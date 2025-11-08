@@ -1,4 +1,4 @@
-name: Deploy ML Model Serving (Manual)
+name: Deploy Cluster CPU ML (Manual)
 
 on:
   workflow_dispatch:
