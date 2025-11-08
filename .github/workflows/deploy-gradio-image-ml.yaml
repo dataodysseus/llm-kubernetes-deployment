@@ -1,0 +1,97 @@
+name: Deploy Gradio ML Model (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      cluster_name:
+        description: 'Cluster name'
+        required: true
+        default: 'llm-deploy-cpu'
+        type: string
+            
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'  # Required for Workload Identity Federation
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Authenticate with Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+          workload_identity_provider: "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}"
+          service_account: "${{ secrets.GCP_SERVICE_ACCOUNT }}"
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+
+      - name: Enable Required Services
+        run: |
+          gcloud services enable container.googleapis.com artifactregistry.googleapis.com
+
+      - name: Configure Docker to Authenticate with Google Artifact Registry
+        run: |
+          export REGION=${{ secrets.GCP_REGION }}
+          gcloud auth configure-docker $REGION-docker.pkg.dev
+
+      - name: Set Working Directory
+        run: |
+          cd ml-model-serving/lm-gradio-app
+
+      - name: Create and Push Docker Image
+        run: |
+          export PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
+          export ARTIFACT_REGISTRY=${{ secrets.GCP_ARTIFACT_REGISTRY }}
+          export REGION=${{ secrets.GCP_REGION }}
+
+          cd ml-model-serving/lm-gradio-app
+          docker build -t $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY/ml-gradio-app:latest .
+          docker push $REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY/ml-gradio-app:latest
+
+      - name: Get GKE Credentials
+        run: |
+          gcloud container clusters get-credentials ${{ inputs.cluster_name }} --region ${{ secrets.GCP_REGION }} --project ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Install gke-gcloud-auth-plugin
+        run: |
+          gcloud components install gke-gcloud-auth-plugin
+          export USE_GKE_GCLOUD_AUTH_PLUGIN=True
+
+      - name: Prepare Kubernetes Deployment Manifest
+        run: |
+          export PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
+          export ARTIFACT_REGISTRY=${{ secrets.GCP_ARTIFACT_REGISTRY }}
+          export REGION=${{ secrets.GCP_REGION }}
+
+          cd ml-model-serving/lm-gradio-app
+          sed -i "s|{{PROJECT_ID}}|$PROJECT_ID|g" gradio-deployment.yaml
+          sed -i "s|{{ARTIFACT_REGISTRY}}|$ARTIFACT_REGISTRY|g" gradio-deployment.yaml
+          sed -i "s|{{REGION}}|$REGION|g" gradio-deployment.yaml
+
+      - name: Deploy Image to GKE
+        run: |
+          cd ml-model-serving/lm-gradio-app
+          kubectl apply -f gradio-deployment.yaml
+
+      - name: Wait for External IP
+        run: |
+          echo "Waiting for External IP..."
+          for i in {1..10}; do
+            EXTERNAL_IP=$(kubectl get svc gradio-service -o=jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            if [[ -n "$EXTERNAL_IP" ]]; then
+              echo "External IP assigned: $EXTERNAL_IP"
+              echo "Access the Gradio app at: http://$EXTERNAL_IP"
+              exit 0
+            fi
+            echo "External IP not assigned yet. Retrying in 30 seconds..."
+            sleep 30
+          done
+          echo "ERROR: Timed out waiting for External IP."
+          exit 1
