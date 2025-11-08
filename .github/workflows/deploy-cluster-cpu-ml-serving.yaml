@@ -1,0 +1,210 @@
+name: Deploy ML Model Serving (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      cluster_name:
+        description: 'Cluster name'
+        required: true
+        default: 'ml-model-cluster'
+        type: string
+      machine_type:
+        description: 'Machine type'
+        required: true
+        default: 'e2-standard-2'  # Reduced from n2d-standard-4 (2 vCPU, 8GB RAM)
+        type: string
+      num_nodes:
+        description: 'Number of nodes'
+        required: true
+        default: '1'
+        type: string
+      model_path:
+        description: 'Path to model deployment folder'
+        required: true
+        default: 'ml-model-serving'
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'  # Required for Workload Identity Federation
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Authenticate with Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+          workload_identity_provider: "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}"
+          service_account: "${{ secrets.GCP_SERVICE_ACCOUNT }}"
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+
+      - name: Install gke-gcloud-auth-plugin
+        run: |
+          gcloud components install gke-gcloud-auth-plugin
+
+      - name: Enable Required Services
+        run: |
+          gcloud services enable container.googleapis.com
+          gcloud services enable artifactregistry.googleapis.com
+
+      - name: Create or Update GKE Cluster
+        run: |
+          #!/bin/bash
+          set -e
+          
+          gcloud config set project ${{ secrets.GCP_PROJECT_ID }}
+        
+          # Check if the cluster already exists
+          if gcloud container clusters describe ${{ inputs.cluster_name }} \
+             --region=${{ secrets.GCP_REGION }} \
+             --project=${{ secrets.GCP_PROJECT_ID }} &>/dev/null; then
+            echo "✅ Cluster '${{ inputs.cluster_name }}' already exists. Skipping creation."
+          else
+            echo "🚀 Creating new GKE cluster: ${{ inputs.cluster_name }}"
+            gcloud container clusters create ${{ inputs.cluster_name }} \
+              --region=${{ secrets.GCP_REGION }} \
+              --node-locations=${{ secrets.GCP_REGION }}-a \
+              --machine-type=${{ inputs.machine_type }} \
+              --num-nodes=${{ inputs.num_nodes }} \
+              --enable-autoscaling \
+              --min-nodes=1 \
+              --max-nodes=3 \
+              --enable-autorepair \
+              --enable-autoupgrade \
+              --workload-pool=${{ secrets.GCP_PROJECT_ID }}.svc.id.goog \
+              --enable-image-streaming \
+              --release-channel=regular
+            echo "✅ Cluster created successfully!"
+          fi
+        
+          # Get cluster credentials
+          echo "🔑 Getting cluster credentials..."
+          gcloud container clusters get-credentials ${{ inputs.cluster_name }} \
+            --region=${{ secrets.GCP_REGION }} \
+            --project=${{ secrets.GCP_PROJECT_ID }}
+          
+          echo "✅ Credentials configured successfully!"
+
+      - name: Verify Cluster Connection
+        run: |
+          echo "🔍 Verifying cluster connection..."
+          kubectl cluster-info
+          kubectl get nodes
+          echo "✅ Cluster connection verified!"
+
+      - name: Build and Push Docker Image
+        run: |
+          echo "🐳 Building Docker image for ML model serving..."
+          
+          # Configure Docker to use gcloud as credential helper
+          gcloud auth configure-docker ${{ secrets.GCP_REGION }}-docker.pkg.dev
+          
+          # Navigate to model directory
+          cd ${{ inputs.model_path }}
+          
+          # Build image
+          IMAGE_NAME="${{ secrets.GCP_REGION }}-docker.pkg.dev/${{ secrets.GCP_PROJECT_ID }}/${{ secrets.ARTIFACT_REGISTRY }}/ml-model-serving:latest"
+          
+          docker build -t $IMAGE_NAME .
+          
+          echo "📤 Pushing image to Artifact Registry..."
+          docker push $IMAGE_NAME
+          
+          echo "✅ Image built and pushed: $IMAGE_NAME"
+
+      - name: Deploy to GKE
+        run: |
+          echo "🚀 Deploying ML model to GKE..."
+          
+          cd ${{ inputs.model_path }}
+          
+          # Apply Kubernetes manifests
+          if [ -f "ml-deployment.yaml" ]; then
+            kubectl apply -f ml-deployment.yaml
+          fi
+          
+          if [ -f "ml-service.yaml" ]; then
+            kubectl apply -f ml-service.yaml
+          fi
+          
+          echo "⏳ Waiting for deployment to be ready..."
+          kubectl rollout status deployment/ml-model-serving --timeout=5m
+          
+          echo "✅ Deployment successful!"
+
+      - name: Get Service Information
+        run: |
+          echo "🔍 Fetching service information..."
+          kubectl get services
+          
+          echo ""
+          echo "⏳ Waiting for LoadBalancer IP (this may take 2-5 minutes)..."
+          
+          # Wait for external IP (max 5 minutes)
+          for i in {1..30}; do
+            EXTERNAL_IP=$(kubectl get service ml-model-service -o jsonpath='{.status.loadBalancer.ingress[0].ip}' 2>/dev/null || echo "")
+            if [ -n "$EXTERNAL_IP" ]; then
+              echo ""
+              echo "🎉 Deployment Complete!"
+              echo "════════════════════════════════════════"
+              echo "External IP: $EXTERNAL_IP"
+              echo "FastAPI Docs: http://$EXTERNAL_IP/docs"
+              echo "Gradio UI: http://$EXTERNAL_IP/gradio"
+              echo "Health Check: http://$EXTERNAL_IP/health"
+              echo "Test Prediction: http://$EXTERNAL_IP/predict?x=5"
+              echo "════════════════════════════════════════"
+              break
+            fi
+            echo "Attempt $i/30: Waiting for LoadBalancer IP..."
+            sleep 10
+          done
+          
+          if [ -z "$EXTERNAL_IP" ]; then
+            echo "⚠️ LoadBalancer IP not assigned yet."
+            echo "Run: kubectl get services ml-model-service"
+          fi
+
+      - name: Display Deployment Status
+        if: always()
+        run: |
+          echo "📊 Deployment Status:"
+          echo "═══════════════════════════════════════════"
+          echo ""
+          echo "Pods:"
+          kubectl get pods -l app=ml-model-serving
+          echo ""
+          echo "Services:"
+          kubectl get services
+          echo ""
+          echo "Deployments:"
+          kubectl get deployments
+          echo ""
+          echo "Recent Events:"
+          kubectl get events --sort-by='.lastTimestamp' | tail -10
+          echo ""
+          echo "═══════════════════════════════════════════"
+
+      - name: Deployment Summary
+        if: success()
+        run: |
+          echo "✅ ML Model Serving Deployment Complete!"
+          echo ""
+          echo "📝 Quick Commands:"
+          echo "  View logs:    kubectl logs -l app=ml-model-serving"
+          echo "  View pods:    kubectl get pods -l app=ml-model-serving"
+          echo "  Scale:        kubectl scale deployment ml-model-serving --replicas=3"
+          echo "  Get IP:       kubectl get service ml-model-service"
+          echo ""
+          echo "🎯 Next Steps:"
+          echo "  1. Test the API endpoints"
+          echo "  2. Share the Gradio UI with stakeholders"
+          echo "  3. Monitor logs for any issues"
