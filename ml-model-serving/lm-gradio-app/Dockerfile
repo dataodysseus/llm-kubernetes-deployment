@@ -1,13 +1,10 @@
 # Dockerfile for Gradio App
-FROM python:3.9-slim
+FROM python:3.10-slim
 
 # Install dependencies
-# Install stable versions that work together
 RUN pip install --no-cache-dir \
-    gradio==3.50.2 \
-    huggingface_hub==0.22.2 \
+    gradio==4.8.0 \
     requests
-
 
 # Copy the Gradio app code
 COPY app.py /app.py
