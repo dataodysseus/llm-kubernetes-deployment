@@ -1,0 +1,75 @@
+name: Deploy Simple Linear Regression Model (Manual)
+
+on:
+  workflow_dispatch:
+    inputs:
+      model_image:
+        description: "Model image name for deployment"
+        required: true
+        default: "simple-linear-model"
+        type: string
+      cluster_name:
+        description: "GKE cluster name"
+        required: true
+        default: "ml-model-cluster"
+        type: string
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: "read"
+      id-token: "write"
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v3
+
+      - name: Authenticate with Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+          workload_identity_provider: "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}"
+          service_account: "${{ secrets.GCP_SERVICE_ACCOUNT }}"
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+
+      - name: Configure Docker for Artifact Registry
+        run: |
+          gcloud auth configure-docker ${{ secrets.GCP_REGION }}-docker.pkg.dev
+
+      - name: Build & Push Simple Model Image
+        run: |
+          export PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
+          export REGION=${{ secrets.GCP_REGION }}
+          export REGISTRY=${{ secrets.GCP_ARTIFACT_REGISTRY }}
+          export IMAGE_NAME=${{ inputs.model_image }}
+
+          cd ML-Model-Serving/simple-linear-regression-model
+          docker build -t $REGION-docker.pkg.dev/$PROJECT_ID/$REGISTRY/$IMAGE_NAME:latest .
+          docker push $REGION-docker.pkg.dev/$PROJECT_ID/$REGISTRY/$IMAGE_NAME:latest
+
+      - name: Get GKE Credentials
+        run: |
+          gcloud container clusters get-credentials ${{ inputs.cluster_name }} \
+            --region ${{ secrets.GCP_REGION }} \
+            --project ${{ secrets.GCP_PROJECT_ID }}
+
+      - name: Replace Template Variables in gradio-deployment.yaml
+        run: |
+          export PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
+          export REGION=${{ secrets.GCP_REGION }}
+          export REGISTRY=${{ secrets.GCP_ARTIFACT_REGISTRY }}
+          export IMAGE_NAME=${{ inputs.model_image }}
+
+          cd ML-Model-Serving/simple-linear-regression-model
+          sed -i "s|{{PROJECT_ID}}|$PROJECT_ID|g" gradio-deployment.yaml
+          sed -i "s|{{REGION}}|$REGION|g" gradio-deployment.yaml
+          sed -i "s|{{ARTIFACT_REGISTRY}}|$REGISTRY|g" gradio-deployment.yaml
+          sed -i "s|{{model_image}}|$IMAGE_NAME|g" gradio-deployment.yaml
+
+      - name: Deploy to GKE
+        run: |
+          cd ML-Model-Serving/simple-linear-regression-model
+          kubectl apply -f gradio-deployment.yaml
