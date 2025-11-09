@@ -14,7 +14,7 @@ spec:
     spec:
       containers:
       - name: linear-regression-container
-        image: <YOUR_ARTIFACT_REGISTRY_IMAGE>:latest
+        image: {{REGION}}-docker.pkg.dev/{{PROJECT_ID}}/{{ARTIFACT_REGISTRY}}/{{model_image}}-cpu-inference:latest
         ports:
         - containerPort: 8000
 ---
