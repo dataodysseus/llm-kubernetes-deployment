@@ -79,3 +79,40 @@ jobs:
         run: |
           cd ML-Model-Serving/simple-linear-regression-model
           kubectl apply -f gradio-deployment.yaml
+
+      - name: Wait for External IP
+        id: get-ip
+        run: |
+          SERVICE_NAME="gradio-service"
+          echo "Waiting for External IP for $SERVICE_NAME..."
+
+          for i in {1..20}; do
+            EXTERNAL_IP=$(kubectl get svc $SERVICE_NAME -o=jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            HOSTNAME=$(kubectl get svc $SERVICE_NAME -o=jsonpath='{.status.loadBalancer.ingress[0].hostname}')
+
+            if [[ -n "$EXTERNAL_IP" ]]; then
+              echo "External IP assigned: $EXTERNAL_IP"
+              echo "::set-output name=external_ip::$EXTERNAL_IP"
+              exit 0
+            fi
+
+            if [[ -n "$HOSTNAME" ]]; then
+              echo "External hostname assigned: $HOSTNAME"
+              echo "::set-output name=external_ip::$HOSTNAME"
+              exit 0
+            fi
+
+            echo "No external IP yet. Waiting 20s..."
+            sleep 20
+          done
+
+          echo "ERROR: Timed out waiting for External IP."
+          exit 1
+
+      - name: Display App URL
+        run: |
+          echo "Your Gradio UI is available at:"
+          echo "http://${{ steps.get-ip.outputs.external_ip }}/gradio"
+
+
+
