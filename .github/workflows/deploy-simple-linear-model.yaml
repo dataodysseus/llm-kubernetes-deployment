@@ -50,8 +50,14 @@ jobs:
           docker build -t $REGION-docker.pkg.dev/$PROJECT_ID/$REGISTRY/$IMAGE_NAME:latest .
           docker push $REGION-docker.pkg.dev/$PROJECT_ID/$REGISTRY/$IMAGE_NAME:latest
 
+      - name: Install gke-gcloud-auth-plugin
+        run: |
+          gcloud components install gke-gcloud-auth-plugin
+          echo "export USE_GKE_GCLOUD_AUTH_PLUGIN=True" >> $GITHUB_ENV
+
       - name: Get GKE Credentials
         run: |
+          export USE_GKE_GCLOUD_AUTH_PLUGIN=True
           gcloud container clusters get-credentials ${{ inputs.cluster_name }} \
             --region ${{ secrets.GCP_REGION }} \
             --project ${{ secrets.GCP_PROJECT_ID }}
