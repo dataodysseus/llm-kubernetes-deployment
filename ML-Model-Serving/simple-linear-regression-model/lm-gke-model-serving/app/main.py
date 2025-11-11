@@ -1,9 +1,9 @@
-# app/main.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from app.model import load_model
+import gradio as gr
 
-app = FastAPI(title="Linear Regression Model API")
+app = FastAPI(title="Linear Regression API + Gradio UI")
 
 app.add_middleware(
     CORSMiddleware,
@@ -12,25 +12,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-model = load_model()  # <- ensure your load_model() returns a trained model
+model = load_model()
 
-@app.get("/")
-def health_check():
-    return {"status": "OK", "message": "Model endpoint is running"}
+@app.get("/predict")
+def predict(x: float):
+    y = model.predict([[x]])[0]
+    return {"input_x": x, "predicted_y": y}
 
-@app.post("/predict")
-def predict(features: dict):
-    """
-    Expecting payload like:
-    {
-      "x": 5.2
-    }
-    """
-    x = features.get("x")
-    if x is None:
-        return {"error": "Please provide feature value 'x'"}
+def predict_ui(x):
+    return model.predict([[x]])[0]
 
-    prediction = model.predict([[x]])  # Adjust based on your model type
-    return {"prediction": prediction[0]}
-
+gradio_app = gr.Interface(fn=predict_ui, inputs="number", outputs="number")
+app = gr.mount_gradio_app(app, gradio_app, path="/gradio")
 
