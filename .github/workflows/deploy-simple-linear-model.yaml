@@ -7,14 +7,12 @@ on:
         description: "Model image name for deployment"
         required: true
         default: "simple-linear-model"
+        type: string
       cluster_name:
         description: "GKE cluster name"
         required: true
         default: "ml-model-cluster"
-      service_name:
-        description: "Kubernetes Service Name"
-        required: true
-        default: "linear-regression-service"
+        type: string
 
 jobs:
   deploy:
@@ -85,8 +83,8 @@ jobs:
       - name: Wait for External IP
         id: get-ip
         run: |
-          SERVICE_NAME="${{ inputs.service_name }}"
-          echo "Waiting for External IP for service: $SERVICE_NAME"
+          SERVICE_NAME="linear-regression-service"
+          echo "Waiting for External IP for $SERVICE_NAME..."
 
           for i in {1..20}; do
             EXTERNAL_IP=$(kubectl get svc $SERVICE_NAME -o=jsonpath='{.status.loadBalancer.ingress[0].ip}')
@@ -104,7 +102,7 @@ jobs:
               exit 0
             fi
 
-            echo "Waiting for external IP... retry in 20s"
+            echo "No external IP yet. Waiting 20s..."
             sleep 20
           done
 
