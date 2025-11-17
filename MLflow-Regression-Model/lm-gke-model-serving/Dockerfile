@@ -1,19 +1,33 @@
-# Dockerfile for Gradio App
-FROM python:3.9-slim
+# Dockerfile for MLflow Model Serving
+FROM python:3.10-slim
 
-# Install dependencies
-# Install stable versions that work together
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python dependencies
 RUN pip install --no-cache-dir \
-    gradio==3.50.2 \
-    huggingface_hub==0.22.2 \
-    requests
+    fastapi \
+    gradio \
+    mlflow \
+    scikit-learn \
+    joblib \
+    uvicorn \
+    numpy \
+    pandas \
+    databricks-cli
 
-
-# Copy the Gradio app code
+# Copy the application files
 COPY app.py /app.py
+COPY model.py /model.py
+
+# Set environment variables
+ENV PORT=8000
+ENV PYTHONUNBUFFERED=1
 
 # Expose the port
-EXPOSE 7860
+EXPOSE 8000
 
-# Run the app
-CMD ["python", "/app.py"]
+# Run the server
+CMD ["uvicorn", "app:app", "--host", "0.0.0.0", "--port", "8000"]
