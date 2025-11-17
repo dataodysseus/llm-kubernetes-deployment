@@ -1,0 +1,80 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: mlflow-model
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: mlflow-model
+  template:
+    metadata:
+      labels:
+        app: mlflow-model
+    spec:
+      containers:
+      - name: mlflow-model
+        image: {{REGION}}-docker.pkg.dev/{{PROJECT_ID}}/{{ARTIFACT_REGISTRY}}/mlflow-model-serving:latest
+        resources:
+          requests:
+            cpu: "250m"
+            memory: "512Mi"
+          limits:
+            cpu: "1000m"
+            memory: "2Gi"
+        env:
+        - name: PORT
+          value: "8000"
+        - name: DATABRICKS_HOST
+          valueFrom:
+            secretKeyRef:
+              name: databricks-secret
+              key: DATABRICKS_HOST
+        - name: DATABRICKS_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: databricks-secret
+              key: DATABRICKS_TOKEN
+        - name: MODEL_URI
+          valueFrom:
+            configMapKeyRef:
+              name: mlflow-config
+              key: MODEL_URI
+        ports:
+        - containerPort: 8000
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 60
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 8000
+          initialDelaySeconds: 30
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: mlflow-model-service
+spec:
+  selector:
+    app: mlflow-model
+  type: ClusterIP
+  ports:
+  - protocol: TCP
+    port: 80
+    targetPort: 8000
+---
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mlflow-config
+data:
+  MODEL_URI: "models:/my-model/Production"  # Update with your model URI
