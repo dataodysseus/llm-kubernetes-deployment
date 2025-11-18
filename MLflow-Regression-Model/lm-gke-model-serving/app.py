@@ -13,6 +13,10 @@ import mlflow
 import mlflow.pyfunc
 import pandas as pd
 import logging
+import dotenv
+
+# Load environment variables from .env file
+dotenv.load_dotenv()
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -54,7 +58,7 @@ os.environ["DATABRICKS_TOKEN"] = DATABRICKS_TOKEN
 # Load the model
 logger.info(f"Loading model from: {MODEL_URI}")
 model = mlflow.pyfunc.load_model(MODEL_URI)
-logger.info("✅ Model loaded successfully!")
+logger.info("Model loaded successfully!")
 
 # Define request format
 class PredictionRequest(BaseModel):

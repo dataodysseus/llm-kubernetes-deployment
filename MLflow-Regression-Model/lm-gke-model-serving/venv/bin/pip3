@@ -1,4 +1,4 @@
-#!/Users/salahuddin/llm-kubernetes-deployment/MLflow-Regression-Model/lm-gke-model-serving/venv/bin/python3.12
+#!/Users/salahuddin/llm-kubernetes-deployment/MLflow-Regression-Model/lm-gke-model-serving/venv/bin/python
 # -*- coding: utf-8 -*-
 import re
 import sys

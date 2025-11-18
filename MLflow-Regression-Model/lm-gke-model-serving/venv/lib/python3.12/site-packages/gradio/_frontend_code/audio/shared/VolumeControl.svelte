@@ -4,7 +4,7 @@
 
 	export let currentVolume = 1;
 	export let show_volume_slider = false;
-	export let waveform: WaveSurfer | undefined;
+	export let waveform: WaveSurfer;
 
 	let volumeElement: HTMLInputElement;
 
@@ -37,7 +37,7 @@
 	on:input={(e) => {
 		if (e.target instanceof HTMLInputElement) {
 			currentVolume = parseFloat(e.target.value);
-			waveform?.setVolume(currentVolume);
+			waveform.setVolume(currentVolume);
 		}
 	}}
 />
