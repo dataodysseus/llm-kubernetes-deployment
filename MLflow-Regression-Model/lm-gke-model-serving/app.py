@@ -46,9 +46,9 @@ logger.info("Loading MLflow model...")
 try:
     model = load_model()
     model_info = get_model_info(model)
-    logger.info(f"✅ Model loaded successfully: {model_info}")
+    logger.info(f"Model loaded successfully: {model_info}")
 except Exception as e:
-    logger.error(f"❌ Failed to load model: {str(e)}")
+    logger.error(f"Failed to load model: {str(e)}")
     raise
 
 # Health check endpoint

@@ -25,9 +25,9 @@ def configure_databricks():
         mlflow.set_tracking_uri("databricks")
         os.environ["DATABRICKS_HOST"] = DATABRICKS_HOST
         os.environ["DATABRICKS_TOKEN"] = DATABRICKS_TOKEN
-        logger.info(f"✅ Configured Databricks connection: {DATABRICKS_HOST}")
+        logger.info(f"Configured Databricks connection: {DATABRICKS_HOST}")
     else:
-        logger.warning("⚠️ DATABRICKS_HOST or DATABRICKS_TOKEN not set")
+        logger.warning("DATABRICKS_HOST or DATABRICKS_TOKEN not set")
 
 def load_model_from_registry(model_name: str, stage: str = "Production"):
     """
@@ -51,11 +51,11 @@ def load_model_from_registry(model_name: str, stage: str = "Production"):
         
         logger.info(f"Loading model from registry: {model_uri}")
         model = mlflow.pyfunc.load_model(model_uri)
-        logger.info(f"✅ Model loaded successfully from registry")
+        logger.info(f"Model loaded successfully from registry")
         
         return model
     except Exception as e:
-        logger.error(f"❌ Failed to load model from registry: {str(e)}")
+        logger.error(f"Failed to load model from registry: {str(e)}")
         raise
 
 def load_model_from_run(run_id: str, artifact_path: str = "model"):
@@ -75,11 +75,11 @@ def load_model_from_run(run_id: str, artifact_path: str = "model"):
         model_uri = f"runs:/{run_id}/{artifact_path}"
         logger.info(f"Loading model from run: {model_uri}")
         model = mlflow.pyfunc.load_model(model_uri)
-        logger.info(f"✅ Model loaded successfully from run")
+        logger.info(f"Model loaded successfully from run")
         
         return model
     except Exception as e:
-        logger.error(f"❌ Failed to load model from run: {str(e)}")
+        logger.error(f"Failed to load model from run: {str(e)}")
         raise
 
 def load_model_from_uri(model_uri: str):
@@ -104,11 +104,11 @@ def load_model_from_uri(model_uri: str):
         
         logger.info(f"Loading model from URI: {model_uri}")
         model = mlflow.pyfunc.load_model(model_uri)
-        logger.info(f"✅ Model loaded successfully")
+        logger.info(f"Model loaded successfully")
         
         return model
     except Exception as e:
-        logger.error(f"❌ Failed to load model from URI: {str(e)}")
+        logger.error(f"Failed to load model from URI: {str(e)}")
         raise
 
 def load_model():
@@ -120,10 +120,10 @@ def load_model():
         if MODEL_URI:
             return load_model_from_uri(MODEL_URI)
         else:
-            logger.warning("⚠️ MODEL_URI not set, using example model")
+            logger.warning("MODEL_URI not set, using example model")
             return load_example_model()
     except Exception as e:
-        logger.error(f"❌ Failed to load model: {str(e)}")
+        logger.error(f"Failed to load model: {str(e)}")
         logger.info("Falling back to example model...")
         return load_example_model()
 
@@ -142,7 +142,7 @@ def load_example_model():
     model = LinearRegression()
     model.fit(X, y)
     
-    logger.info("✅ Example model created")
+    logger.info("Example model created")
     return model
 
 def get_model_info(model):
