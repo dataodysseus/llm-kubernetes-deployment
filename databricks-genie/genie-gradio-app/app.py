@@ -1,99 +1,291 @@
 import gradio as gr
 import os
-from databricks import sql
+import requests
 import logging
+from typing import Optional
+import json
 
 # Configure logging
-logging.basicConfig(level=logging.INFO)
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
 logger = logging.getLogger(__name__)
 
 # Databricks configuration from environment variables
 DATABRICKS_HOST = os.getenv("DATABRICKS_HOST")
 DATABRICKS_TOKEN = os.getenv("DATABRICKS_TOKEN")
-DATABRICKS_WAREHOUSE_ID = os.getenv("DATABRICKS_WAREHOUSE_ID")
-GENIE_SPACE_ID = os.getenv("GENIE_SPACE_ID", "your-genie-space-id")  # Add to secrets
+GENIE_SPACE_ID = os.getenv("GENIE_SPACE_ID")
 
-def query_genie(user_question):
+# Validate required environment variables
+required_vars = {
+    "DATABRICKS_HOST": DATABRICKS_HOST,
+    "DATABRICKS_TOKEN": DATABRICKS_TOKEN,
+    "GENIE_SPACE_ID": GENIE_SPACE_ID
+}
+
+missing_vars = [k for k, v in required_vars.items() if not v]
+if missing_vars:
+    logger.error(f"Missing required environment variables: {', '.join(missing_vars)}")
+    raise ValueError(f"Missing required environment variables: {', '.join(missing_vars)}")
+
+logger.info(f"Connected to Databricks workspace: {DATABRICKS_HOST}")
+logger.info(f"Using Genie Space: {GENIE_SPACE_ID}")
+
+
+def query_genie(user_question: str) -> str:
     """
-    Query Databricks Genie and return the response
+    Query Databricks Genie using the REST API
+    
+    Args:
+        user_question: Natural language question from user
+        
+    Returns:
+        Formatted response string
     """
+    if not user_question or not user_question.strip():
+        return "⚠️ Please enter a question."
+    
     try:
-        # Connect to Databricks
-        connection = sql.connect(
-            server_hostname=DATABRICKS_HOST,
-            http_path=f"/sql/1.0/warehouses/{DATABRICKS_WAREHOUSE_ID}",
-            access_token=DATABRICKS_TOKEN
-        )
+        logger.info(f"User query: {user_question}")
         
-        cursor = connection.cursor()
+        # Databricks Genie API endpoint
+        url = f"https://{DATABRICKS_HOST}/api/2.0/genie/spaces/{GENIE_SPACE_ID}/start-conversation"
         
-        # Use Genie API or direct SQL query
-        # For demo, using direct SQL - adapt based on your Genie setup
-        logger.info(f"Executing query: {user_question}")
+        headers = {
+            "Authorization": f"Bearer {DATABRICKS_TOKEN}",
+            "Content-Type": "application/json"
+        }
         
-        # This is a simplified example - adapt to your Genie API integration
-        cursor.execute(f"SELECT ai_query('{user_question}')")
+        # Create conversation and ask question
+        payload = {
+            "content": user_question
+        }
         
-        result = cursor.fetchall()
+        logger.info(f"Calling Genie API: {url}")
+        response = requests.post(url, headers=headers, json=payload, timeout=30)
         
-        cursor.close()
-        connection.close()
-        
-        # Format response
-        if result:
-            response = "\n".join([str(row) for row in result])
-            return response
-        else:
-            return "No results found."
+        if response.status_code == 200:
+            result = response.json()
+            logger.info(f"Genie API response received")
             
+            # Extract the conversation ID
+            conversation_id = result.get("conversation_id")
+            message_id = result.get("message_id")
+            
+            if not conversation_id or not message_id:
+                return "❌ Error: Invalid response from Genie API"
+            
+            # Poll for the result
+            result_url = f"https://{DATABRICKS_HOST}/api/2.0/genie/spaces/{GENIE_SPACE_ID}/conversations/{conversation_id}/messages/{message_id}"
+            
+            # Wait for response (poll up to 30 seconds)
+            import time
+            max_attempts = 30
+            for attempt in range(max_attempts):
+                time.sleep(1)
+                
+                poll_response = requests.get(result_url, headers=headers, timeout=10)
+                
+                if poll_response.status_code == 200:
+                    poll_result = poll_response.json()
+                    status = poll_result.get("status")
+                    
+                    if status == "COMPLETED":
+                        # Extract the answer
+                        attachments = poll_result.get("attachments", [])
+                        
+                        # Look for text response
+                        for attachment in attachments:
+                            if attachment.get("text"):
+                                text_content = attachment["text"].get("content", "")
+                                if text_content:
+                                    logger.info(f"Query successful")
+                                    return text_content
+                        
+                        # Look for query results
+                        query_result = poll_result.get("query_result")
+                        if query_result:
+                            # Format the result
+                            data = query_result.get("data_typed_array", [])
+                            if data:
+                                # Format as table
+                                return format_query_result(data)
+                        
+                        return "✅ Query completed but no results found."
+                    
+                    elif status == "FAILED":
+                        error_msg = poll_result.get("error", {}).get("message", "Unknown error")
+                        logger.error(f"Genie query failed: {error_msg}")
+                        return f"❌ Query failed: {error_msg}"
+            
+            return "⏱️ Query timed out. Please try again with a simpler question."
+        
+        elif response.status_code == 401:
+            return "❌ Authentication failed. Please check your Databricks token."
+        
+        elif response.status_code == 404:
+            return f"❌ Genie Space not found. Please verify Space ID: {GENIE_SPACE_ID}"
+        
+        else:
+            error_text = response.text
+            logger.error(f"API error {response.status_code}: {error_text}")
+            return f"❌ API Error ({response.status_code}): {error_text}"
+            
+    except requests.exceptions.Timeout:
+        logger.error("Request timeout")
+        return "⏱️ Request timeout. Please try again."
+        
+    except requests.exceptions.ConnectionError as e:
+        logger.error(f"Connection error: {str(e)}")
+        return "❌ Cannot connect to Databricks. Please check your network."
+        
     except Exception as e:
-        logger.error(f"Error querying Genie: {str(e)}")
-        return f"Error: {str(e)}"
+        error_msg = f"Unexpected error: {str(e)}"
+        logger.error(error_msg, exc_info=True)
+        return f"❌ Error: {str(e)}"
+
+
+def format_query_result(data: list) -> str:
+    """
+    Format query result data into readable text
+    
+    Args:
+        data: List of rows from query result
+        
+    Returns:
+        Formatted string representation
+    """
+    if not data:
+        return "No results found."
+    
+    # Get column names from first row
+    if len(data) > 0 and isinstance(data[0], dict):
+        columns = list(data[0].keys())
+        
+        # Create header
+        result = "| " + " | ".join(columns) + " |\n"
+        result += "|-" + "-|-".join(["-" * len(col) for col in columns]) + "-|\n"
+        
+        # Add rows
+        for row in data[:10]:  # Limit to 10 rows for display
+            values = [str(row.get(col, "")) for col in columns]
+            result += "| " + " | ".join(values) + " |\n"
+        
+        if len(data) > 10:
+            result += f"\n... and {len(data) - 10} more rows"
+        
+        return result
+    
+    # Fallback to simple format
+    return json.dumps(data, indent=2)
+
+
+# Custom CSS for better styling
+custom_css = """
+#component-0 {
+    max-width: 1400px;
+    margin: auto;
+    padding: 20px;
+}
+.gradio-container {
+    font-family: 'IBM Plex Sans', sans-serif;
+}
+"""
 
 # Create Gradio interface
-with gr.Blocks(title="Databricks Genie Assistant") as demo:
-    gr.Markdown("# 🤖 Databricks Genie Assistant")
-    gr.Markdown("Ask questions about your sales data in natural language!")
+with gr.Blocks(css=custom_css, title="Databricks Genie Assistant", theme=gr.themes.Soft()) as demo:
     
-    with gr.Row():
-        with gr.Column(scale=2):
-            user_input = gr.Textbox(
-                label="Your Question",
-                placeholder="e.g., What were the top 5 products by revenue last month?",
-                lines=3
-            )
-            submit_btn = gr.Button("Ask Genie", variant="primary")
+    # Header
+    gr.Markdown(
+        """
+        # 🤖 Databricks Genie Assistant
+        ### Ask questions about your sales data in natural language!
         
-        with gr.Column(scale=3):
+        This AI assistant is powered by Databricks Genie and has access to your complete sales database.
+        """
+    )
+    
+    # Main interface
+    with gr.Row():
+        with gr.Column(scale=1):
+            gr.Markdown("### 💬 Your Question")
+            user_input = gr.Textbox(
+                label="",
+                placeholder="e.g., What are the top 5 products by revenue?",
+                lines=4,
+                max_lines=10
+            )
+            
+            with gr.Row():
+                submit_btn = gr.Button("🚀 Ask Genie", variant="primary", size="lg")
+                clear_btn = gr.Button("🗑️ Clear", variant="secondary")
+        
+        with gr.Column(scale=1):
+            gr.Markdown("### 📊 Genie's Response")
             output = gr.Textbox(
-                label="Genie's Response",
-                lines=10,
-                interactive=False
+                label="",
+                lines=12,
+                max_lines=25,
+                interactive=False,
+                show_copy_button=True
             )
     
     # Example questions
-    gr.Markdown("### Example Questions:")
-    gr.Examples(
-        examples=[
-            "What are the top 5 products by revenue?",
-            "Show me sales trends by month",
-            "Which store has the highest sales?",
-            "What's our total revenue for Q4?",
-        ],
-        inputs=user_input
+    with gr.Accordion("📝 Example Questions", open=False):
+        gr.Examples(
+            examples=[
+                ["What are the top 5 products by revenue?"],
+                ["Show me sales trends by month"],
+                ["Which store has the highest sales?"],
+                ["What's our total revenue for Q4?"],
+            ],
+            inputs=user_input,
+            label="Click any example to try it:"
+        )
+    
+    # Connection status
+    with gr.Accordion("🔗 Connection Info", open=False):
+        gr.Markdown(
+            f"""
+            **Databricks Workspace:** `{DATABRICKS_HOST}`  
+            **Genie Space ID:** `{GENIE_SPACE_ID}`
+            
+            Status: ✅ Connected
+            """
+        )
+    
+    # Event handlers
+    submit_btn.click(
+        fn=query_genie,
+        inputs=user_input,
+        outputs=output,
+        api_name="query"
     )
     
-    # Connect button to query function
-    submit_btn.click(
+    clear_btn.click(
+        fn=lambda: ("", ""),
+        inputs=None,
+        outputs=[user_input, output]
+    )
+    
+    # Allow Enter key to submit
+    user_input.submit(
         fn=query_genie,
         inputs=user_input,
         outputs=output
     )
 
+
 # Launch the app
 if __name__ == "__main__":
+    logger.info("Starting Databricks Genie Gradio App...")
+    logger.info(f"Databricks Host: {DATABRICKS_HOST}")
+    logger.info(f"Genie Space ID: {GENIE_SPACE_ID}")
+    
     demo.launch(
         server_name="0.0.0.0",
         server_port=7860,
-        share=False
+        share=False,
+        show_error=True
     )

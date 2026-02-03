@@ -28,11 +28,11 @@ spec:
             secretKeyRef:
               name: databricks-secret
               key: DATABRICKS_TOKEN
-        - name: DATABRICKS_WAREHOUSE_ID
+        - name: GENIE_SPACE_ID
           valueFrom:
             secretKeyRef:
               name: databricks-secret
-              key: DATABRICKS_WAREHOUSE_ID
+              key: GENIE_SPACE_ID
         resources:
           requests:
             memory: "512Mi"

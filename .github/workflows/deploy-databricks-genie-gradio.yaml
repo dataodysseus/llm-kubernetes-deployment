@@ -70,7 +70,7 @@ jobs:
           kubectl create secret generic databricks-secret \
             --from-literal=DATABRICKS_HOST=${{ secrets.DATABRICKS_HOST }} \
             --from-literal=DATABRICKS_TOKEN=${{ secrets.DATABRICKS_TOKEN }} \
-            --from-literal=DATABRICKS_WAREHOUSE_ID=${{ secrets.DATABRICKS_WAREHOUSE_ID }} \
+            --from-literal=GENIE_SPACE_ID=${{ secrets.GENIE_SPACE_ID }} \
             --dry-run=client -o yaml | kubectl apply -f -
 
       - name: Prepare Kubernetes Deployment Manifest
