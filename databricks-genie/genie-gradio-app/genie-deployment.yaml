@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: genie-gradio-deployment
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: genie-gradio
+  template:
+    metadata:
+      labels:
+        app: genie-gradio
+    spec:
+      containers:
+      - name: genie-gradio
+        image: {{REGION}}-docker.pkg.dev/{{PROJECT_ID}}/{{ARTIFACT_REGISTRY}}/databricks-genie-gradio:latest
+        ports:
+        - containerPort: 7860
+        env:
+        - name: DATABRICKS_HOST
+          valueFrom:
+            secretKeyRef:
+              name: databricks-secret
+              key: DATABRICKS_HOST
+        - name: DATABRICKS_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: databricks-secret
+              key: DATABRICKS_TOKEN
+        - name: DATABRICKS_WAREHOUSE_ID
+          valueFrom:
+            secretKeyRef:
+              name: databricks-secret
+              key: DATABRICKS_WAREHOUSE_ID
+        resources:
+          requests:
+            memory: "512Mi"
+            cpu: "500m"
+          limits:
+            memory: "1Gi"
+            cpu: "1000m"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: genie-gradio-service
+spec:
+  selector:
+    app: genie-gradio
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 7860
+  type: LoadBalancer
