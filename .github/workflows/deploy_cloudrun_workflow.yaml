@@ -1,0 +1,236 @@
+# GitHub Actions Workflow: Deploy FastAPI Genie to Cloud Run
+# Simpler and cheaper alternative to GKE for low traffic (10 users/month)
+
+name: Deploy Genie FastAPI to Cloud Run
+
+on:
+  workflow_dispatch:
+    inputs:
+      service_name:
+        description: 'Cloud Run service name'
+        required: true
+        default: 'genie-fastapi'
+        type: string
+      region:
+        description: 'Cloud Run region'
+        required: true
+        default: 'us-central1'
+        type: string
+      allow_unauthenticated:
+        description: 'Allow unauthenticated access'
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Authenticate with Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+          workload_identity_provider: "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}"
+          service_account: "${{ secrets.GCP_SERVICE_ACCOUNT }}"
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+
+      - name: Enable Required Services
+        run: |
+          echo "🔧 Enabling required GCP services..."
+          gcloud services enable run.googleapis.com
+          gcloud services enable artifactregistry.googleapis.com
+          gcloud services enable cloudbuild.googleapis.com
+          echo "✅ Services enabled"
+
+      - name: Configure Docker Authentication
+        run: |
+          export REGION=${{ inputs.region }}
+          gcloud auth configure-docker $REGION-docker.pkg.dev
+          echo "✅ Docker auth configured"
+
+      - name: Build and Push Docker Image
+        run: |
+          export PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
+          export ARTIFACT_REGISTRY=${{ secrets.GCP_ARTIFACT_REGISTRY }}
+          export REGION=${{ inputs.region }}
+          export TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          export IMAGE_BASE=$REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY/genie-fastapi
+          
+          echo "🔨 Building Docker image..."
+          echo "Image: $IMAGE_BASE:latest"
+          
+          cd databricks-genie/genie-fastapi-app
+          
+          # Build with both tags
+          docker build \
+            -t $IMAGE_BASE:latest \
+            -t $IMAGE_BASE:$TIMESTAMP \
+            .
+          
+          echo "📤 Pushing images..."
+          docker push $IMAGE_BASE:latest
+          docker push $IMAGE_BASE:$TIMESTAMP
+          
+          echo "✅ Images pushed successfully"
+          echo "IMAGE_URI=$IMAGE_BASE:latest" >> $GITHUB_ENV
+
+      - name: Deploy to Cloud Run
+        run: |
+          export PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
+          export REGION=${{ inputs.region }}
+          export SERVICE_NAME=${{ inputs.service_name }}
+          
+          echo "🚀 Deploying to Cloud Run..."
+          echo "Service: $SERVICE_NAME"
+          echo "Region: $REGION"
+          echo "Image: $IMAGE_URI"
+          
+          gcloud run deploy $SERVICE_NAME \
+            --image $IMAGE_URI \
+            --region $REGION \
+            --platform managed \
+            --set-env-vars "DATABRICKS_HOST=${{ secrets.DATABRICKS_HOST }},DATABRICKS_TOKEN=${{ secrets.DATABRICKS_TOKEN }},SPACE_ID=${{ secrets.GENIE_SPACE_ID }}" \
+            --allow-unauthenticated \
+            --min-instances 0 \
+            --max-instances 10 \
+            --memory 512Mi \
+            --cpu 1 \
+            --timeout 300 \
+            --concurrency 80 \
+            --port 8080 \
+            --quiet
+          
+          echo "✅ Cloud Run deployment complete"
+
+      - name: Get Service URL
+        run: |
+          export SERVICE_NAME=${{ inputs.service_name }}
+          export REGION=${{ inputs.region }}
+          
+          echo ""
+          echo "=========================================="
+          echo "🎉 DEPLOYMENT SUCCESSFUL"
+          echo "=========================================="
+          echo ""
+          
+          SERVICE_URL=$(gcloud run services describe $SERVICE_NAME \
+            --region $REGION \
+            --format 'value(status.url)')
+          
+          echo "🌐 Service URL: $SERVICE_URL"
+          echo ""
+          echo "📋 API Endpoints:"
+          echo "  • Health Check: $SERVICE_URL/health"
+          echo "  • Query Genie: POST $SERVICE_URL/genie/query"
+          echo "  • Swagger 2.0 (OpenAPI): $SERVICE_URL/swagger.json"
+          echo "  • Swagger UI: $SERVICE_URL/docs"
+          echo ""
+          echo "🔑 Environment Variables:"
+          echo "  • DATABRICKS_HOST: ${{ secrets.DATABRICKS_HOST }}"
+          echo "  • SPACE_ID: ${{ secrets.GENIE_SPACE_ID }}"
+          echo "  • Authentication: Personal Access Token"
+          echo ""
+          echo "📊 Configuration:"
+          echo "  • Min Instances: 0 (scales to zero)"
+          echo "  • Max Instances: 10"
+          echo "  • Memory: 512Mi"
+          echo "  • CPU: 1"
+          echo "  • Timeout: 300s"
+          echo "  • Concurrency: 80"
+          echo ""
+          echo "=========================================="
+
+      - name: Test Deployment
+        run: |
+          export SERVICE_NAME=${{ inputs.service_name }}
+          export REGION=${{ inputs.region }}
+          
+          SERVICE_URL=$(gcloud run services describe $SERVICE_NAME \
+            --region $REGION \
+            --format 'value(status.url)')
+          
+          echo ""
+          echo "🧪 Testing deployment..."
+          echo ""
+          
+          # Test health endpoint
+          echo "Testing health endpoint..."
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" $SERVICE_URL/health || echo "000")
+          
+          if [[ "$HTTP_CODE" == "200" ]]; then
+            echo "✅ Health check passed (HTTP $HTTP_CODE)"
+            
+            # Get health response
+            HEALTH_RESPONSE=$(curl -s $SERVICE_URL/health)
+            echo "Response: $HEALTH_RESPONSE"
+          else
+            echo "⚠️ Health check returned HTTP $HTTP_CODE"
+          fi
+          
+          echo ""
+          echo "📖 API Documentation:"
+          echo "  • Interactive Docs: $SERVICE_URL/docs"
+          echo "  • ReDoc: $SERVICE_URL/redoc"
+          echo "  • Swagger 2.0 JSON: $SERVICE_URL/swagger.json"
+
+      - name: Deployment Summary
+        run: |
+          export SERVICE_NAME=${{ inputs.service_name }}
+          export REGION=${{ inputs.region }}
+          
+          SERVICE_URL=$(gcloud run services describe $SERVICE_NAME \
+            --region $REGION \
+            --format 'value(status.url)')
+          
+          echo ""
+          echo "=========================================="
+          echo "📝 NEXT STEPS"
+          echo "=========================================="
+          echo ""
+          echo "1️⃣ Test the API:"
+          echo "   curl $SERVICE_URL/health"
+          echo ""
+          echo "2️⃣ Query Genie:"
+          echo "   curl -X POST $SERVICE_URL/genie/query \\"
+          echo "     -H 'Content-Type: application/json' \\"
+          echo "     -d '{"
+          echo "       \"user_id\": \"user123\","
+          echo "       \"question\": \"What are the top 5 products by revenue?\""
+          echo "     }'"
+          echo ""
+          echo "3️⃣ Get Swagger 2.0 for PowerApps:"
+          echo "   curl $SERVICE_URL/swagger.json"
+          echo ""
+          echo "4️⃣ Import to PowerApps/Teams:"
+          echo "   • Copy Swagger URL: $SERVICE_URL/swagger.json"
+          echo "   • In PowerApps: Add Data → Custom Connector"
+          echo "   • Paste Swagger URL"
+          echo ""
+          echo "💰 Cost Estimate:"
+          echo "   • Free tier: 2M requests/month"
+          echo "   • 10 users/month: ~$0-1/month"
+          echo "   • Scales to zero when not in use"
+          echo ""
+          echo "=========================================="
+
+      - name: Save Service URL as Output
+        run: |
+          export SERVICE_NAME=${{ inputs.service_name }}
+          export REGION=${{ inputs.region }}
+          
+          SERVICE_URL=$(gcloud run services describe $SERVICE_NAME \
+            --region $REGION \
+            --format 'value(status.url)')
+          
+          echo "SERVICE_URL=$SERVICE_URL" >> $GITHUB_OUTPUT
