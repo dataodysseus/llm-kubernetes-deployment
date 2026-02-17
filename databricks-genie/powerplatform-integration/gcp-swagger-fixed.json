@@ -1,0 +1,229 @@
+{
+  "swagger": "2.0",
+  "info": {
+    "title": "Genie API Service",
+    "description": "Databricks Genie integration for Microsoft Teams",
+    "version": "1.0.0"
+  },
+  "host": "genie-fastapi-zgzszpwa2a-uk.a.run.app",
+  "basePath": "/",
+  "schemes": ["https"],
+  "consumes": ["application/json"],
+  "produces": ["application/json"],
+  "paths": {
+    "/": {
+      "get": {
+        "summary": "Health Check",
+        "description": "Health check endpoint",
+        "operationId": "Health_check__get",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "schema": {
+              "$ref": "#/definitions/HealthResponse"
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "summary": "Health",
+        "description": "Alternative health check endpoint",
+        "operationId": "Health_health_get",
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "schema": {
+              "$ref": "#/definitions/HealthResponse"
+            }
+          }
+        }
+      }
+    },
+    "/genie/query": {
+      "post": {
+        "summary": "Query Genie",
+        "description": "Main endpoint to query Databricks Genie\n\n- **user_id**: Unique identifier for the user (from Teams)\n- **question**: The question to ask Genie\n- **session_id**: Optional conversation ID to continue existing conversation\n- **max_wait**: Maximum seconds to wait for response (default 120)",
+        "operationId": "Query_genie_genie_query_post",
+        "parameters": [
+          {
+            "name": "body",
+            "in": "body",
+            "required": true,
+            "schema": {
+              "$ref": "#/definitions/QueryRequest"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response",
+            "schema": {
+              "$ref": "#/definitions/QueryResponse"
+            }
+          },
+          "422": {
+            "description": "Validation Error",
+            "schema": {
+              "$ref": "#/definitions/HTTPValidationError"
+            }
+          }
+        }
+      }
+    },
+    "/genie/session/{user_id}": {
+      "delete": {
+        "summary": "Clear Session",
+        "description": "Clear conversation session for a user",
+        "operationId": "Clear_session_genie_session__user_id__delete",
+        "parameters": [
+          {
+            "name": "user_id",
+            "in": "path",
+            "required": true,
+            "type": "string"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "schema": {
+              "$ref": "#/definitions/HTTPValidationError"
+            }
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "HTTPValidationError": {
+      "type": "object",
+      "title": "HTTPValidationError",
+      "properties": {
+        "detail": {
+          "type": "array",
+          "title": "Detail",
+          "items": {
+            "$ref": "#/definitions/ValidationError"
+          }
+        }
+      }
+    },
+    "HealthResponse": {
+      "type": "object",
+      "title": "HealthResponse",
+      "required": ["status", "databricks_host", "space_id"],
+      "properties": {
+        "status": {
+          "type": "string",
+          "title": "Status"
+        },
+        "databricks_host": {
+          "type": "string",
+          "title": "Databricks Host"
+        },
+        "space_id": {
+          "type": "string",
+          "title": "Space Id"
+        }
+      }
+    },
+    "QueryRequest": {
+      "type": "object",
+      "title": "QueryRequest",
+      "required": ["user_id", "question"],
+      "properties": {
+        "user_id": {
+          "type": "string",
+          "title": "User Id"
+        },
+        "question": {
+          "type": "string",
+          "title": "Question"
+        },
+        "session_id": {
+          "type": "string",
+          "title": "Session Id"
+        },
+        "max_wait": {
+          "type": "integer",
+          "title": "Max Wait",
+          "default": 120
+        }
+      }
+    },
+    "QueryResponse": {
+      "type": "object",
+      "title": "QueryResponse",
+      "required": ["session_id", "answer_text", "status"],
+      "properties": {
+        "session_id": {
+          "type": "string",
+          "title": "Session Id"
+        },
+        "answer_text": {
+          "type": "string",
+          "title": "Answer Text"
+        },
+        "sql": {
+          "type": "string",
+          "title": "Sql"
+        },
+        "columns": {
+          "type": "array",
+          "title": "Columns",
+          "items": {
+            "type": "string"
+          }
+        },
+        "rows": {
+          "type": "array",
+          "title": "Rows",
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
+          }
+        },
+        "row_count": {
+          "type": "integer",
+          "title": "Row Count",
+          "default": 0
+        },
+        "status": {
+          "type": "string",
+          "title": "Status"
+        }
+      }
+    },
+    "ValidationError": {
+      "type": "object",
+      "title": "ValidationError",
+      "required": ["loc", "msg", "type"],
+      "properties": {
+        "loc": {
+          "type": "array",
+          "title": "Location",
+          "items": {
+            "type": "string"
+          }
+        },
+        "msg": {
+          "type": "string",
+          "title": "Message"
+        },
+        "type": {
+          "type": "string",
+          "title": "Error Type"
+        }
+      }
+    }
+  }
+}
