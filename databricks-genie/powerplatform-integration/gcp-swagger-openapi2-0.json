@@ -5,7 +5,7 @@
     "description": "Databricks Genie integration for Microsoft Teams",
     "version": "1.0.0"
   },
-  "host": "genie-fastapi-zgzszpwa2a-uk.a.run.app",
+  "host": "genie-fastapi-******-uk.a.run.app",
   "basePath": "/",
   "schemes": ["https"],
   "consumes": ["application/json"],
