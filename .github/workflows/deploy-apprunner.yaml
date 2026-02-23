@@ -140,6 +140,56 @@ jobs:
               echo "✅ Service updated successfully. App Runner is deploying the new image!"
             fi
 
+            echo "=========================================="
+            echo "⏳ Waiting for App Runner deployment to stabilize..."
+            echo "=========================================="
+
+            # Set up our polling variables (Wait up to 15 minutes)
+            WAIT_INTERVAL=20
+            MAX_WAIT=900
+            ELAPSED=0
+
+            while [ $ELAPSED -lt $MAX_WAIT ]; do
+              # Fetch the current status of the service
+              SERVICE_STATUS=$(aws apprunner describe-service \
+                --service-arn $SERVICE_ARN \
+                --region us-east-1 \
+                --query "Service.Status" \
+                --output text)
+              
+              if [ "$SERVICE_STATUS" == "RUNNING" ]; then
+                echo ""
+                echo "✅ Deployment successful! Service is now RUNNING."
+                
+                # Grab and display the live URL
+                SERVICE_URL=$(aws apprunner describe-service \
+                  --service-arn $SERVICE_ARN \
+                  --region us-east-1 \
+                  --query "Service.ServiceUrl" \
+                  --output text)
+                
+                echo "🌐 Live URL: https://$SERVICE_URL"
+                echo "🩺 Health Check: https://$SERVICE_URL/health"
+                echo "📖 Swagger UI: https://$SERVICE_URL/docs"
+                exit 0
+                
+              elif [[ "$SERVICE_STATUS" == *"FAILED"* ]] || [[ "$SERVICE_STATUS" == "DELETED" ]]; then
+                echo ""
+                echo "❌ Deployment failed. App Runner reached status: $SERVICE_STATUS"
+                echo "Please check the AWS App Runner Event Logs in the AWS Console for the exact reason."
+                exit 1
+              fi
+              
+              echo "Current status: $SERVICE_STATUS... checking again in ${WAIT_INTERVAL}s (Elapsed: ${ELAPSED}s / ${MAX_WAIT}s)"
+              sleep $WAIT_INTERVAL
+              ELAPSED=$((ELAPSED + WAIT_INTERVAL))
+            done
+
+            echo ""
+            echo "⚠️ Deployment timed out in GitHub Actions after 15 minutes."
+            echo "The service might still be deploying in AWS. Check the AWS Console."
+            exit 1
+
       - name: Wait for deployment to complete
         run: |
           SERVICE_ARN=$(aws apprunner list-services \
