@@ -36,13 +36,7 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ secrets.APP_RUNNER_ACCESS_ROLE_ARN }}
-          aws-region: ${{ env.AWS_REGION }}
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: ${{ secrets.APP_RUNNER_ACCESS_ROLE_ARN }}  # Use your secret
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           aws-region: ${{ env.AWS_REGION }}
 
       - name: Login to Amazon ECR
@@ -93,13 +87,13 @@ jobs:
                     \"RuntimeEnvironmentVariables\": {
                       \"DATABRICKS_HOST\": \"${{ secrets.DATABRICKS_HOST }}\",
                       \"DATABRICKS_TOKEN\": \"${{ secrets.DATABRICKS_TOKEN }}\",
-                      \"SPACE_ID\": \"${{ secrets.SPACE_ID }}\"
+                      \"SPACE_ID\": \"${{ secrets.GENIE_SPACE_ID }}\"
                     }
                   }
                 },
                 \"AutoDeploymentsEnabled\": false,
                 \"AuthenticationConfiguration\": {
-                  \"AccessRoleArn\": \"${{ secrets.AWS_ROLE_ARN }}\"
+                  \"AccessRoleArn\": \"${{ secrets.APP_RUNNER_ACCESS_ROLE_ARN }}\"
                 }
               }" \
               --instance-configuration '{
@@ -132,7 +126,7 @@ jobs:
                     \"RuntimeEnvironmentVariables\": {
                       \"DATABRICKS_HOST\": \"${{ secrets.DATABRICKS_HOST }}\",
                       \"DATABRICKS_TOKEN\": \"${{ secrets.DATABRICKS_TOKEN }}\",
-                      \"SPACE_ID\": \"${{ secrets.SPACE_ID }}\"
+                      \"SPACE_ID\": \"${{ secrets.GENIE_SPACE_ID }}\"
                     }
                   }
                 },
