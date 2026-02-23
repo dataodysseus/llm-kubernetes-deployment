@@ -376,4 +376,6 @@ async def get_swagger_2():
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # Dynamically grab the port from App Runner, default to 8080 for local dev
+    port = int(os.environ.get("PORT", 8080))
+    uvicorn.run(app, host="0.0.0.0", port=port)
