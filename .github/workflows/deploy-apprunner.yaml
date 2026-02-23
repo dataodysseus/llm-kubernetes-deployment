@@ -112,40 +112,33 @@ jobs:
             echo "✅ Service created successfully"
             
           else
-            echo "Updating existing App Runner service..."
-            echo "Service ARN: $SERVICE_ARN"
-            
-            aws apprunner update-service \
-              --service-arn $SERVICE_ARN \
-              --region ${{ env.AWS_REGION }} \
-              --source-configuration "{
-                \"ImageRepository\": {
-                  \"ImageIdentifier\": \"${IMAGE_URI}\",
-                  \"ImageRepositoryType\": \"ECR\",
-                  \"ImageConfiguration\": {
-                    \"Port\": \"8080\",
-                    \"RuntimeEnvironmentVariables\": {
-                      \"DATABRICKS_HOST\": \"${{ secrets.DATABRICKS_HOST }}\",
-                      \"DATABRICKS_TOKEN\": \"${{ secrets.DATABRICKS_TOKEN }}\",
-                      \"SPACE_ID\": \"${{ secrets.GENIE_SPACE_ID }}\"
-                    }
-                  }
-                },
-                \"AutoDeploymentsEnabled\": false,
-                \"AuthenticationConfiguration\": {
-                  \"AccessRoleArn\": \"${{ secrets.AWS_ROLE_ARN }}\"
-                }
-              }"
-            
-            echo "✅ Service updated successfully"
-            
-            # Trigger deployment
-            aws apprunner start-deployment \
-              --service-arn $SERVICE_ARN \
-              --region ${{ env.AWS_REGION }}
+              echo "Updating existing App Runner service..."
+              echo "Service ARN: $SERVICE_ARN"
               
-            echo "✅ Deployment started"
-          fi
+              aws apprunner update-service \
+                --service-arn $SERVICE_ARN \
+                --region us-east-1 \
+                --source-configuration "{
+                  \"ImageRepository\": {
+                    \"ImageIdentifier\": \"${IMAGE_URI}\",
+                    \"ImageRepositoryType\": \"ECR\",
+                    \"ImageConfiguration\": {
+                      \"Port\": \"8080\",
+                      \"RuntimeEnvironmentVariables\": {
+                        \"DATABRICKS_HOST\": \"${{ secrets.DATABRICKS_HOST }}\",
+                        \"DATABRICKS_TOKEN\": \"${{ secrets.DATABRICKS_TOKEN }}\",
+                        \"SPACE_ID\": \"${{ secrets.GENIE_SPACE_ID }}\"
+                      }
+                    }
+                  },
+                  \"AutoDeploymentsEnabled\": false,
+                  \"AuthenticationConfiguration\": {
+                    \"AccessRoleArn\": \"${{ secrets.APP_RUNNER_ACCESS_ROLE_ARN }}\"
+                  }
+                }"
+              
+              echo "✅ Service updated successfully. App Runner is deploying the new image!"
+            fi
 
       - name: Wait for deployment to complete
         run: |
