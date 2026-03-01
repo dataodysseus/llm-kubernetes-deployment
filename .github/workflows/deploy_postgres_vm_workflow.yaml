@@ -1,0 +1,342 @@
+# GitHub Actions Workflow: Deploy PostgreSQL on GCP Compute Engine (e2-micro)
+# Free tier eligible. Uses same OIDC/Workload Identity Federation as Cloud Run workflow.
+
+name: Deploy PostgreSQL VM on GCP
+
+on:
+  workflow_dispatch:
+    inputs:
+      vm_name:
+        description: 'VM instance name'
+        required: true
+        default: 'postgres-vm'
+        type: string
+      region:
+        description: 'GCP region'
+        required: true
+        default: 'us-central1'
+        type: string
+      zone:
+        description: 'GCP zone'
+        required: true
+        default: 'us-central1-a'
+        type: string
+      db_name:
+        description: 'PostgreSQL database name to create'
+        required: true
+        default: 'appdb'
+        type: string
+      recreate_vm:
+        description: 'Delete and recreate VM if it already exists'
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  deploy-postgres:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: 'read'
+      id-token: 'write'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Authenticate with Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+          workload_identity_provider: "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}"
+          service_account: "${{ secrets.GCP_SERVICE_ACCOUNT }}"
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+
+      - name: Enable Required GCP Services
+        run: |
+          echo "🔧 Enabling required GCP services..."
+          gcloud services enable compute.googleapis.com
+          gcloud services enable oslogin.googleapis.com
+          echo "✅ Services enabled"
+
+      # -------------------------------------------------------
+      # Firewall: allow PostgreSQL port 5432 from anywhere
+      # -------------------------------------------------------
+      - name: Create Firewall Rule for PostgreSQL
+        run: |
+          RULE_NAME="allow-postgres-5432"
+          
+          if gcloud compute firewall-rules describe $RULE_NAME --quiet 2>/dev/null; then
+            echo "ℹ️ Firewall rule '$RULE_NAME' already exists, skipping."
+          else
+            echo "🔧 Creating firewall rule to open port 5432..."
+            gcloud compute firewall-rules create $RULE_NAME \
+              --allow tcp:5432 \
+              --target-tags postgres-server \
+              --source-ranges 0.0.0.0/0 \
+              --description "Allow external PostgreSQL access"
+            echo "✅ Firewall rule created"
+          fi
+
+      # -------------------------------------------------------
+      # VM: create e2-micro with Ubuntu 22.04 (free tier)
+      # -------------------------------------------------------
+      - name: Create or Reuse VM
+        run: |
+          export VM_NAME=${{ inputs.vm_name }}
+          export ZONE=${{ inputs.zone }}
+          export RECREATE=${{ inputs.recreate_vm }}
+
+          VM_EXISTS=$(gcloud compute instances list \
+            --filter="name=$VM_NAME AND zone:$ZONE" \
+            --format="value(name)" 2>/dev/null)
+
+          if [[ -n "$VM_EXISTS" ]]; then
+            if [[ "$RECREATE" == "true" ]]; then
+              echo "♻️ Deleting existing VM '$VM_NAME'..."
+              gcloud compute instances delete $VM_NAME \
+                --zone $ZONE \
+                --quiet
+            else
+              echo "ℹ️ VM '$VM_NAME' already exists. Skipping creation (set recreate_vm=true to replace it)."
+              echo "VM_CREATED=false" >> $GITHUB_ENV
+              exit 0
+            fi
+          fi
+
+          echo "🖥️ Creating e2-micro VM with Ubuntu 22.04..."
+          gcloud compute instances create $VM_NAME \
+            --zone $ZONE \
+            --machine-type e2-micro \
+            --image-family ubuntu-2204-lts \
+            --image-project ubuntu-os-cloud \
+            --boot-disk-size 30GB \
+            --boot-disk-type pd-standard \
+            --tags postgres-server \
+            --metadata enable-oslogin=TRUE \
+            --scopes https://www.googleapis.com/auth/cloud-platform
+
+          echo "✅ VM created"
+          echo "VM_CREATED=true" >> $GITHUB_ENV
+
+          echo "⏳ Waiting 30s for VM to initialize..."
+          sleep 30
+
+      # -------------------------------------------------------
+      # Install PostgreSQL via startup script over SSH
+      # -------------------------------------------------------
+      - name: Install PostgreSQL on VM
+        run: |
+          export VM_NAME=${{ inputs.vm_name }}
+          export ZONE=${{ inputs.zone }}
+          export DB_NAME=${{ inputs.db_name }}
+          export DB_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+
+          echo "📦 Installing PostgreSQL 15 on VM..."
+
+          gcloud compute ssh $VM_NAME \
+            --zone $ZONE \
+            --tunnel-through-iap \
+            --command "
+              set -e
+
+              # Install PostgreSQL 15
+              sudo apt-get update -qq
+              sudo apt-get install -y postgresql postgresql-contrib
+
+              # Start and enable service
+              sudo systemctl enable postgresql
+              sudo systemctl start postgresql
+
+              echo '✅ PostgreSQL installed and running'
+            "
+
+      - name: Configure PostgreSQL (user, auth, remote access)
+        run: |
+          export VM_NAME=${{ inputs.vm_name }}
+          export ZONE=${{ inputs.zone }}
+          export DB_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+
+          echo "🔐 Configuring PostgreSQL for remote access..."
+
+          gcloud compute ssh $VM_NAME \
+            --zone $ZONE \
+            --tunnel-through-iap \
+            --command "
+              set -e
+
+              # Set password for postgres superuser
+              sudo -u postgres psql -c \"ALTER USER postgres PASSWORD '$DB_PASSWORD';\"
+
+              # Allow remote connections in postgresql.conf
+              PG_CONF=\$(sudo -u postgres psql -t -c 'SHOW config_file;' | xargs)
+              sudo sed -i \"s/#listen_addresses = 'localhost'/listen_addresses = '*'/\" \$PG_CONF
+
+              # Allow password auth from any IP in pg_hba.conf
+              PG_HBA=\$(sudo -u postgres psql -t -c 'SHOW hba_file;' | xargs)
+              echo 'host    all             all             0.0.0.0/0               md5' | sudo tee -a \$PG_HBA
+
+              # Restart to apply config changes
+              sudo systemctl restart postgresql
+
+              echo '✅ Remote access configured'
+            "
+
+      # -------------------------------------------------------
+      # Create schema, table, and seed data
+      # -------------------------------------------------------
+      - name: Create Database, Schema, Table, and Seed Data
+        run: |
+          export VM_NAME=${{ inputs.vm_name }}
+          export ZONE=${{ inputs.zone }}
+          export DB_NAME=${{ inputs.db_name }}
+          export DB_PASSWORD=${{ secrets.POSTGRES_PASSWORD }}
+
+          echo "🗄️ Creating database, schema, tables, and seed data..."
+
+          gcloud compute ssh $VM_NAME \
+            --zone $ZONE \
+            --tunnel-through-iap \
+            --command "
+              set -e
+
+              sudo -u postgres psql <<'SQL'
+
+              -- Create the database (skip if already exists)
+              SELECT 'CREATE DATABASE $DB_NAME'
+              WHERE NOT EXISTS (
+                SELECT FROM pg_database WHERE datname = '$DB_NAME'
+              )\gexec
+
+              \connect $DB_NAME
+
+              -- -----------------------------------------------
+              -- Schema
+              -- -----------------------------------------------
+              CREATE SCHEMA IF NOT EXISTS sales;
+
+              -- -----------------------------------------------
+              -- Tables
+              -- -----------------------------------------------
+              CREATE TABLE IF NOT EXISTS sales.customers (
+                customer_id   SERIAL PRIMARY KEY,
+                name          VARCHAR(100)  NOT NULL,
+                email         VARCHAR(150)  UNIQUE NOT NULL,
+                country       VARCHAR(60)   NOT NULL,
+                created_at    TIMESTAMP     DEFAULT NOW()
+              );
+
+              CREATE TABLE IF NOT EXISTS sales.products (
+                product_id    SERIAL PRIMARY KEY,
+                name          VARCHAR(100)  NOT NULL,
+                category      VARCHAR(60),
+                unit_price    NUMERIC(10,2) NOT NULL
+              );
+
+              CREATE TABLE IF NOT EXISTS sales.orders (
+                order_id      SERIAL PRIMARY KEY,
+                customer_id   INT REFERENCES sales.customers(customer_id),
+                product_id    INT REFERENCES sales.products(product_id),
+                quantity      INT           NOT NULL CHECK (quantity > 0),
+                total_amount  NUMERIC(12,2) NOT NULL,
+                order_date    DATE          DEFAULT CURRENT_DATE
+              );
+
+              -- -----------------------------------------------
+              -- Seed Data: Customers
+              -- -----------------------------------------------
+              INSERT INTO sales.customers (name, email, country) VALUES
+                ('Alice Johnson',  'alice@example.com',  'USA'),
+                ('Bob Smith',      'bob@example.com',    'Canada'),
+                ('Clara Diaz',     'clara@example.com',  'Mexico'),
+                ('David Lee',      'david@example.com',  'UK'),
+                ('Eva Müller',     'eva@example.com',    'Germany')
+              ON CONFLICT (email) DO NOTHING;
+
+              -- -----------------------------------------------
+              -- Seed Data: Products
+              -- -----------------------------------------------
+              INSERT INTO sales.products (name, category, unit_price) VALUES
+                ('Laptop Pro 15',    'Electronics',  1299.99),
+                ('Wireless Mouse',   'Electronics',    29.99),
+                ('Standing Desk',    'Furniture',     499.00),
+                ('USB-C Hub',        'Electronics',    49.99),
+                ('Ergonomic Chair',  'Furniture',     349.00)
+              ON CONFLICT DO NOTHING;
+
+              -- -----------------------------------------------
+              -- Seed Data: Orders
+              -- -----------------------------------------------
+              INSERT INTO sales.orders (customer_id, product_id, quantity, total_amount, order_date) VALUES
+                (1, 1, 1, 1299.99, '2024-01-15'),
+                (1, 2, 2,   59.98, '2024-01-16'),
+                (2, 3, 1,  499.00, '2024-02-01'),
+                (3, 4, 3,  149.97, '2024-02-10'),
+                (4, 5, 1,  349.00, '2024-02-14'),
+                (5, 1, 1, 1299.99, '2024-03-01'),
+                (2, 2, 1,   29.99, '2024-03-05')
+              ON CONFLICT DO NOTHING;
+
+              -- -----------------------------------------------
+              -- Quick verification
+              -- -----------------------------------------------
+              SELECT 'customers' AS tbl, COUNT(*) FROM sales.customers
+              UNION ALL
+              SELECT 'products',         COUNT(*) FROM sales.products
+              UNION ALL
+              SELECT 'orders',           COUNT(*) FROM sales.orders;
+
+SQL
+              echo '✅ Schema, tables, and seed data created'
+            "
+
+      # -------------------------------------------------------
+      # Print connection details
+      # -------------------------------------------------------
+      - name: Print Connection Summary
+        run: |
+          export VM_NAME=${{ inputs.vm_name }}
+          export ZONE=${{ inputs.zone }}
+          export REGION=${{ inputs.region }}
+          export DB_NAME=${{ inputs.db_name }}
+
+          PUBLIC_IP=$(gcloud compute instances describe $VM_NAME \
+            --zone $ZONE \
+            --format 'value(networkInterfaces[0].accessConfigs[0].natIP)')
+
+          echo ""
+          echo "=========================================="
+          echo "🎉 DEPLOYMENT SUCCESSFUL"
+          echo "=========================================="
+          echo ""
+          echo "🌐 VM Public IP:   $PUBLIC_IP"
+          echo "🗄️ Database:       $DB_NAME"
+          echo "🔌 Port:           5432"
+          echo "👤 User:           postgres"
+          echo "🔑 Password:       (stored in POSTGRES_PASSWORD secret)"
+          echo ""
+          echo "📋 Connection String:"
+          echo "   postgresql://postgres:<password>@$PUBLIC_IP:5432/$DB_NAME"
+          echo ""
+          echo "📋 Schema Overview:"
+          echo "   • sales.customers  — 5 rows seeded"
+          echo "   • sales.products   — 5 rows seeded"
+          echo "   • sales.orders     — 7 rows seeded"
+          echo ""
+          echo "🧪 Quick test:"
+          echo "   psql postgresql://postgres:<password>@$PUBLIC_IP:5432/$DB_NAME \\"
+          echo "     -c 'SELECT * FROM sales.orders LIMIT 5;'"
+          echo ""
+          echo "⚠️  SECURITY REMINDER:"
+          echo "   Port 5432 is open to 0.0.0.0/0."
+          echo "   Consider restricting the firewall rule to your IP range"
+          echo "   once you have confirmed connectivity."
+          echo ""
+          echo "💰 Cost Estimate (e2-micro, us-central1):"
+          echo "   • Compute: FREE (GCP free tier)"
+          echo "   • Disk 30GB standard: ~$1.20/mo"
+          echo "   • Egress: minimal for low traffic"
+          echo "=========================================="
