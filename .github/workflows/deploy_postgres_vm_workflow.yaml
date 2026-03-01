@@ -128,8 +128,25 @@ jobs:
           gcloud compute ssh ${{ inputs.vm_name }} \
             --zone ${{ inputs.zone }} \
             --tunnel-through-iap \
-            --command "sudo apt-get update -qq && sudo apt-get install -y postgresql postgresql-contrib && sudo systemctl enable postgresql && sudo systemctl start postgresql && echo done"
-          echo "✅ PostgreSQL installed and running"
+            --command "
+              set -e
+              sudo apt-get update -qq
+              sudo apt-get install -y curl ca-certificates gnupg
+
+              # Add official PostgreSQL apt repository (PGDG)
+              curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+                | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg
+              echo 'deb http://apt.postgresql.org/pub/repos/apt jammy-pgdg main' \
+                | sudo tee /etc/apt/sources.list.d/pgdg.list
+
+              sudo apt-get update -qq
+              sudo apt-get install -y postgresql-15 postgresql-contrib-15
+
+              sudo systemctl enable postgresql
+              sudo systemctl start postgresql
+              echo done
+            "
+          echo "✅ PostgreSQL 15 installed and running"
 
       # -------------------------------------------------------
       # Configure remote access
