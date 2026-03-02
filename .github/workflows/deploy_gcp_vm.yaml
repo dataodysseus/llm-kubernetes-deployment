@@ -1,0 +1,319 @@
+# ============================================================
+# Workflow 1: Provision a GCP Compute Engine VM
+# ============================================================
+# Purpose   : Generic, reusable VM provisioning — no app logic.
+#             Use this as the first step for ANY workload
+#             (PostgreSQL, Redis, FastAPI, ML inference, etc.)
+#
+# Outputs   : VM name, zone, and public IP printed in summary.
+#             Pass these as inputs to any app-layer workflow.
+#
+# Reuses    : GCP_PROJECT_ID, GCP_WORKLOAD_IDENTITY_PROVIDER,
+#             GCP_SERVICE_ACCOUNT (same secrets as Cloud Run WF)
+#
+# Required IAM roles on service account:
+#   - Compute Admin
+#   - IAP-secured Tunnel User
+#   - Service Account User
+#   - Compute OS Login
+# ============================================================
+
+name: "1 · Provision GCP VM"
+
+on:
+  workflow_dispatch:
+    inputs:
+
+      # ----------------------------------------------------------
+      # Identity
+      # ----------------------------------------------------------
+      vm_name:
+        description: "VM instance name (lowercase, hyphens only)"
+        required: true
+        default: "my-vm"
+        type: string
+
+      # ----------------------------------------------------------
+      # Location
+      # ----------------------------------------------------------
+      region:
+        description: "GCP region"
+        required: true
+        default: "us-central1"
+        type: choice
+        options:
+          - us-central1
+          - us-east1
+          - us-west1
+          - europe-west1
+          - europe-west2
+          - asia-east1
+          - asia-southeast1
+
+      zone:
+        description: "GCP zone (must match region above)"
+        required: true
+        default: "us-central1-a"
+        type: choice
+        options:
+          - us-central1-a
+          - us-central1-b
+          - us-east1-b
+          - us-east1-c
+          - us-west1-a
+          - europe-west1-b
+          - europe-west2-a
+          - asia-east1-a
+          - asia-southeast1-a
+
+      # ----------------------------------------------------------
+      # Machine type  (covers free → production spectrum)
+      # ----------------------------------------------------------
+      machine_type:
+        description: "VM machine type"
+        required: true
+        default: "e2-micro"
+        type: choice
+        options:
+          - e2-micro        # 0.25 vCPU / 1 GB  — free tier eligible
+          - e2-small        # 0.5  vCPU / 2 GB  — ~$13/mo
+          - e2-medium       # 1    vCPU / 4 GB  — ~$26/mo  ← recommended for Postgres
+          - e2-standard-2   # 2    vCPU / 8 GB  — ~$49/mo
+          - e2-standard-4   # 4    vCPU / 16 GB — ~$97/mo
+          - n2-standard-2   # 2    vCPU / 8 GB  — ~$60/mo  (higher perf)
+          - n2-standard-4   # 4    vCPU / 16 GB — ~$120/mo (higher perf)
+          - c2-standard-4   # 4    vCPU / 16 GB — compute-optimised
+
+      # ----------------------------------------------------------
+      # OS image
+      # ----------------------------------------------------------
+      os_image:
+        description: "OS image family"
+        required: true
+        default: "ubuntu-2204-lts"
+        type: choice
+        options:
+          - ubuntu-2204-lts    # Ubuntu 22.04 LTS  (recommended)
+          - ubuntu-2004-lts    # Ubuntu 20.04 LTS
+          - debian-12          # Debian 12 Bookworm
+          - debian-11          # Debian 11 Bullseye
+          - cos-stable         # Container-Optimised OS (for Docker workloads)
+
+      os_image_project:
+        description: "GCP project that hosts the OS image"
+        required: true
+        default: "ubuntu-os-cloud"
+        type: choice
+        options:
+          - ubuntu-os-cloud    # Ubuntu images
+          - debian-cloud       # Debian images
+          - cos-cloud          # Container-Optimised OS
+
+      # ----------------------------------------------------------
+      # Storage
+      # ----------------------------------------------------------
+      disk_size_gb:
+        description: "Boot disk size in GB (min 10)"
+        required: true
+        default: "30"
+        type: choice
+        options:
+          - "10"
+          - "20"
+          - "30"   # free-tier maximum
+          - "50"
+          - "100"
+          - "200"
+          - "500"
+
+      disk_type:
+        description: "Boot disk type"
+        required: true
+        default: "pd-standard"
+        type: choice
+        options:
+          - pd-standard   # HDD  — cheapest (~$0.04/GB/mo)
+          - pd-balanced   # SSD  — balanced  (~$0.10/GB/mo)
+          - pd-ssd        # SSD  — fastest   (~$0.17/GB/mo)
+
+      # ----------------------------------------------------------
+      # Network / firewall tags
+      # Tags are used by firewall rules to target specific VMs.
+      # Add comma-separated tags matching your firewall rules,
+      # e.g. "postgres-server,http-server"
+      # ----------------------------------------------------------
+      network_tags:
+        description: "Comma-separated network tags (e.g. postgres-server,http-server)"
+        required: false
+        default: "general-vm"
+        type: string
+
+      # ----------------------------------------------------------
+      # Lifecycle
+      # ----------------------------------------------------------
+      recreate_vm:
+        description: "Delete and recreate VM if it already exists"
+        required: false
+        default: false
+        type: boolean
+
+jobs:
+  provision-vm:
+    name: "Provision ${{ inputs.machine_type }} VM → ${{ inputs.zone }}"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      # --------------------------------------------------------
+      # Auth
+      # --------------------------------------------------------
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Authenticate with Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+          workload_identity_provider: "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}"
+          service_account: "${{ secrets.GCP_SERVICE_ACCOUNT }}"
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+
+      # --------------------------------------------------------
+      # Enable APIs
+      # --------------------------------------------------------
+      - name: Enable Required GCP Services
+        run: |
+          echo "🔧 Enabling required GCP APIs..."
+          gcloud services enable compute.googleapis.com
+          gcloud services enable oslogin.googleapis.com
+          gcloud services enable iap.googleapis.com
+          echo "✅ APIs enabled"
+
+      # --------------------------------------------------------
+      # VM provisioning
+      # --------------------------------------------------------
+      - name: Create or Reuse VM
+        run: |
+          VM_NAME="${{ inputs.vm_name }}"
+          ZONE="${{ inputs.zone }}"
+          RECREATE="${{ inputs.recreate_vm }}"
+          MACHINE_TYPE="${{ inputs.machine_type }}"
+          OS_IMAGE="${{ inputs.os_image }}"
+          OS_IMAGE_PROJECT="${{ inputs.os_image_project }}"
+          DISK_SIZE="${{ inputs.disk_size_gb }}"
+          DISK_TYPE="${{ inputs.disk_type }}"
+          TAGS="${{ inputs.network_tags }}"
+
+          VM_EXISTS=$(gcloud compute instances list \
+            --filter="name=${VM_NAME} AND zone:${ZONE}" \
+            --format="value(name)" 2>/dev/null)
+
+          if [[ -n "$VM_EXISTS" ]]; then
+            if [[ "$RECREATE" == "true" ]]; then
+              echo "♻️ Deleting existing VM '${VM_NAME}'..."
+              gcloud compute instances delete ${VM_NAME} --zone ${ZONE} --quiet
+              echo "✅ Old VM deleted"
+            else
+              echo "ℹ️ VM '${VM_NAME}' already exists — skipping creation."
+              echo "   Set 'recreate_vm = true' to replace it."
+              exit 0
+            fi
+          fi
+
+          echo ""
+          echo "🖥️ Provisioning VM..."
+          echo "   Name         : ${VM_NAME}"
+          echo "   Zone         : ${ZONE}"
+          echo "   Machine type : ${MACHINE_TYPE}"
+          echo "   OS image     : ${OS_IMAGE} (${OS_IMAGE_PROJECT})"
+          echo "   Disk         : ${DISK_SIZE}GB ${DISK_TYPE}"
+          echo "   Network tags : ${TAGS}"
+          echo ""
+
+          gcloud compute instances create ${VM_NAME} \
+            --zone ${ZONE} \
+            --machine-type ${MACHINE_TYPE} \
+            --image-family ${OS_IMAGE} \
+            --image-project ${OS_IMAGE_PROJECT} \
+            --boot-disk-size ${DISK_SIZE}GB \
+            --boot-disk-type ${DISK_TYPE} \
+            --tags ${TAGS} \
+            --metadata enable-oslogin=TRUE \
+            --scopes https://www.googleapis.com/auth/cloud-platform
+
+          echo "✅ VM created successfully"
+          echo "⏳ Waiting 30s for VM to fully initialize..."
+          sleep 30
+
+      # --------------------------------------------------------
+      # Smoke test — confirm VM is reachable via IAP
+      # --------------------------------------------------------
+      - name: Verify VM is Reachable via IAP
+        run: |
+          echo "🔍 Verifying IAP SSH connectivity..."
+          gcloud compute ssh ${{ inputs.vm_name }} \
+            --zone ${{ inputs.zone }} \
+            --tunnel-through-iap \
+            --command "echo '✅ IAP SSH connection successful' && uname -a && df -h /"
+          echo "✅ VM is reachable"
+
+      # --------------------------------------------------------
+      # Summary
+      # --------------------------------------------------------
+      - name: Print VM Summary
+        run: |
+          VM_NAME="${{ inputs.vm_name }}"
+          ZONE="${{ inputs.zone }}"
+
+          PUBLIC_IP=$(gcloud compute instances describe ${VM_NAME} \
+            --zone ${ZONE} \
+            --format 'value(networkInterfaces[0].accessConfigs[0].natIP)')
+
+          INTERNAL_IP=$(gcloud compute instances describe ${VM_NAME} \
+            --zone ${ZONE} \
+            --format 'value(networkInterfaces[0].networkIP)')
+
+          MACHINE_TYPE="${{ inputs.machine_type }}"
+          OS_IMAGE="${{ inputs.os_image }}"
+          DISK_SIZE="${{ inputs.disk_size_gb }}"
+
+          echo ""
+          echo "=============================================="
+          echo "🎉 VM PROVISIONED SUCCESSFULLY"
+          echo "=============================================="
+          echo ""
+          echo "🖥️  Name          : ${VM_NAME}"
+          echo "📍 Zone          : ${ZONE}"
+          echo "⚙️  Machine type  : ${MACHINE_TYPE}"
+          echo "💿 OS            : ${OS_IMAGE}"
+          echo "💾 Disk          : ${DISK_SIZE}GB"
+          echo "🌐 Public IP     : ${PUBLIC_IP}"
+          echo "🔒 Internal IP   : ${INTERNAL_IP}"
+          echo ""
+          echo "📋 Next steps:"
+          echo "   Run Workflow 2 (Install PostgreSQL) with:"
+          echo "   • vm_name  → ${VM_NAME}"
+          echo "   • zone     → ${ZONE}"
+          echo ""
+          echo "🔗 GCP Console:"
+          echo "   https://console.cloud.google.com/compute/instancesDetail/zones/${ZONE}/instances/${VM_NAME}"
+          echo ""
+          echo "💰 Estimated cost (${MACHINE_TYPE}, us-central1):"
+          case ${MACHINE_TYPE} in
+            e2-micro)      echo "   ~\$0/mo (free tier eligible)" ;;
+            e2-small)      echo "   ~\$13/mo" ;;
+            e2-medium)     echo "   ~\$26/mo" ;;
+            e2-standard-2) echo "   ~\$49/mo" ;;
+            e2-standard-4) echo "   ~\$97/mo" ;;
+            n2-standard-2) echo "   ~\$60/mo" ;;
+            n2-standard-4) echo "   ~\$120/mo" ;;
+            *)             echo "   See https://cloud.google.com/compute/all-pricing" ;;
+          esac
+          echo "   + Disk: \$$(echo "scale=2; ${DISK_SIZE} * 0.04" | bc)/mo (pd-standard)"
+          echo "=============================================="
