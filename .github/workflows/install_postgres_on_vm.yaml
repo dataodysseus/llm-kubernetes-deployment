@@ -1,0 +1,452 @@
+# ============================================================
+# Workflow 2: Install & Configure PostgreSQL on a GCP VM
+# ============================================================
+# Purpose   : App-layer workflow. Installs PostgreSQL 15,
+#             configures remote access, creates a database,
+#             schema, tables and seeds sample data.
+#
+# Pre-req   : VM must already exist and be running.
+#             Run Workflow 1 (Provision GCP VM) first.
+#
+# Inputs    : vm_name + zone from Workflow 1 output summary.
+#
+# Secrets required (same as other workflows + one new):
+#   - GCP_PROJECT_ID
+#   - GCP_WORKLOAD_IDENTITY_PROVIDER
+#   - GCP_SERVICE_ACCOUNT
+#   - POSTGRES_PASSWORD   ← password for the postgres superuser
+#
+# Required IAM roles on service account:
+#   - Compute Admin
+#   - IAP-secured Tunnel User
+#   - Service Account User
+#   - Compute OS Login
+# ============================================================
+
+name: "Install PostgreSQL on GCP VM"
+
+on:
+  workflow_dispatch:
+    inputs:
+
+      # ----------------------------------------------------------
+      # Target VM — must already exist (run Workflow 1 first)
+      # ----------------------------------------------------------
+      vm_name:
+        description: "VM instance name (from Workflow 1 output)"
+        required: true
+        default: "my-vm"
+        type: string
+
+      zone:
+        description: "GCP zone where the VM is running"
+        required: true
+        default: "us-central1-a"
+        type: choice
+        options:
+          - us-central1-a
+          - us-central1-b
+          - us-east1-b
+          - us-east1-c
+          - us-west1-a
+          - europe-west1-b
+          - europe-west2-a
+          - asia-east1-a
+          - asia-southeast1-a
+
+      # ----------------------------------------------------------
+      # PostgreSQL version
+      # ----------------------------------------------------------
+      pg_version:
+        description: "PostgreSQL major version to install"
+        required: true
+        default: "15"
+        type: choice
+        options:
+          - "15"   # stable, recommended
+          - "16"   # latest
+          - "14"   # LTS fallback
+
+      # ----------------------------------------------------------
+      # Database & schema
+      # ----------------------------------------------------------
+      db_name:
+        description: "Database name to create"
+        required: true
+        default: "appdb"
+        type: string
+
+      db_user:
+        description: "Application DB user to create (separate from postgres superuser)"
+        required: true
+        default: "appuser"
+        type: string
+
+      # ----------------------------------------------------------
+      # Access control
+      # ----------------------------------------------------------
+      allowed_cidr:
+        description: "CIDR range allowed to connect on port 5432 (0.0.0.0/0 = anywhere)"
+        required: true
+        default: "0.0.0.0/0"
+        type: string
+
+      # ----------------------------------------------------------
+      # Seed data
+      # ----------------------------------------------------------
+      seed_sample_data:
+        description: "Seed the sales schema with sample data (customers, products, orders)"
+        required: false
+        default: true
+        type: boolean
+
+jobs:
+  install-postgres:
+    name: "PostgreSQL ${{ inputs.pg_version }} → ${{ inputs.vm_name }}"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      # --------------------------------------------------------
+      # Auth
+      # --------------------------------------------------------
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Authenticate with Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+          workload_identity_provider: "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}"
+          service_account: "${{ secrets.GCP_SERVICE_ACCOUNT }}"
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+
+      # --------------------------------------------------------
+      # Pre-flight: confirm VM exists and is running
+      # --------------------------------------------------------
+      - name: Verify Target VM Exists
+        run: |
+          VM_NAME="${{ inputs.vm_name }}"
+          ZONE="${{ inputs.zone }}"
+
+          STATUS=$(gcloud compute instances describe ${VM_NAME} \
+            --zone ${ZONE} \
+            --format 'value(status)' 2>/dev/null || echo "NOT_FOUND")
+
+          if [[ "$STATUS" == "NOT_FOUND" ]]; then
+            echo "❌ VM '${VM_NAME}' not found in zone ${ZONE}."
+            echo "   Please run Workflow 1 (Provision GCP VM) first."
+            exit 1
+          fi
+
+          if [[ "$STATUS" != "RUNNING" ]]; then
+            echo "❌ VM '${VM_NAME}' exists but status is '${STATUS}' (expected RUNNING)."
+            exit 1
+          fi
+
+          echo "✅ VM '${VM_NAME}' is RUNNING in ${ZONE}"
+
+      # --------------------------------------------------------
+      # Firewall: open port 5432 with tag-based rule
+      # --------------------------------------------------------
+      - name: Create Firewall Rule for PostgreSQL
+        run: |
+          RULE_NAME="allow-postgres-5432"
+          CIDR="${{ inputs.allowed_cidr }}"
+
+          if gcloud compute firewall-rules describe ${RULE_NAME} --quiet 2>/dev/null; then
+            echo "ℹ️ Firewall rule '${RULE_NAME}' already exists — skipping."
+          else
+            echo "🔧 Creating firewall rule (port 5432, source ${CIDR})..."
+            gcloud compute firewall-rules create ${RULE_NAME} \
+              --allow tcp:5432 \
+              --target-tags postgres-server \
+              --source-ranges ${CIDR} \
+              --description "Allow PostgreSQL access"
+            echo "✅ Firewall rule created"
+          fi
+
+          # Ensure the VM has the postgres-server tag
+          echo "🏷️ Ensuring VM has 'postgres-server' network tag..."
+          EXISTING_TAGS=$(gcloud compute instances describe ${{ inputs.vm_name }} \
+            --zone ${{ inputs.zone }} \
+            --format 'value(tags.items)')
+
+          if echo "$EXISTING_TAGS" | grep -q "postgres-server"; then
+            echo "ℹ️ Tag already present"
+          else
+            gcloud compute instances add-tags ${{ inputs.vm_name }} \
+              --zone ${{ inputs.zone }} \
+              --tags postgres-server
+            echo "✅ Tag added"
+          fi
+
+      # --------------------------------------------------------
+      # Install PostgreSQL from official PGDG repo
+      # --------------------------------------------------------
+      - name: Install PostgreSQL ${{ inputs.pg_version }}
+        run: |
+          PG_VERSION="${{ inputs.pg_version }}"
+
+          gcloud compute ssh ${{ inputs.vm_name }} \
+            --zone ${{ inputs.zone }} \
+            --tunnel-through-iap \
+            --command "
+              set -e
+              echo '📦 Updating apt and installing prerequisites...'
+              sudo apt-get update -qq
+              sudo apt-get install -y curl ca-certificates gnupg
+
+              echo '📦 Adding official PostgreSQL PGDG repository...'
+              curl -fsSL https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+                | sudo gpg --dearmor -o /etc/apt/trusted.gpg.d/postgresql.gpg
+              echo 'deb http://apt.postgresql.org/pub/repos/apt jammy-pgdg main' \
+                | sudo tee /etc/apt/sources.list.d/pgdg.list
+
+              sudo apt-get update -qq
+              echo '📦 Installing PostgreSQL ${PG_VERSION}...'
+              sudo apt-get install -y postgresql-${PG_VERSION} postgresql-contrib-${PG_VERSION}
+
+              sudo systemctl enable postgresql
+              sudo systemctl start postgresql
+
+              echo ''
+              echo '✅ PostgreSQL installed:'
+              sudo -u postgres psql -c 'SELECT version();'
+            "
+          echo "✅ PostgreSQL ${{ inputs.pg_version }} installed and running"
+
+      # --------------------------------------------------------
+      # Configure: superuser password + remote access
+      # --------------------------------------------------------
+      - name: Configure PostgreSQL for Remote Access
+        run: |
+          DB_PASSWORD="${{ secrets.POSTGRES_PASSWORD }}"
+          CIDR="${{ inputs.allowed_cidr }}"
+
+          gcloud compute ssh ${{ inputs.vm_name }} \
+            --zone ${{ inputs.zone }} \
+            --tunnel-through-iap \
+            --command "
+              set -e
+
+              echo '🔐 Setting postgres superuser password...'
+              sudo -u postgres psql -c \"ALTER USER postgres PASSWORD '${DB_PASSWORD}';\"
+
+              echo '🔧 Configuring listen_addresses = * ...'
+              PG_CONF=\$(sudo -u postgres psql -t -c 'SHOW config_file;' | xargs)
+              sudo sed -i \"s/#listen_addresses = 'localhost'/listen_addresses = '*'/\" \$PG_CONF
+
+              echo '🔧 Adding pg_hba.conf entry for ${CIDR}...'
+              PG_HBA=\$(sudo -u postgres psql -t -c 'SHOW hba_file;' | xargs)
+              echo 'host    all             all             ${CIDR}               scram-sha-256' \
+                | sudo tee -a \$PG_HBA
+
+              echo '🔄 Restarting PostgreSQL to apply config...'
+              sudo systemctl restart postgresql
+              echo '✅ Remote access configured'
+            "
+          echo "✅ PostgreSQL remote access configured"
+
+      # --------------------------------------------------------
+      # Create app database and dedicated app user
+      # --------------------------------------------------------
+      - name: Create Database and App User
+        run: |
+          DB_NAME="${{ inputs.db_name }}"
+          DB_USER="${{ inputs.db_user }}"
+          DB_PASSWORD="${{ secrets.POSTGRES_PASSWORD }}"
+
+          gcloud compute ssh ${{ inputs.vm_name }} \
+            --zone ${{ inputs.zone }} \
+            --tunnel-through-iap \
+            --command "
+              set -e
+
+              echo '🗄️ Creating database and app user...'
+
+              sudo -u postgres psql -c \"
+                SELECT 'CREATE DATABASE ${DB_NAME}'
+                WHERE NOT EXISTS (
+                  SELECT FROM pg_database WHERE datname = '${DB_NAME}'
+                )
+              \"\gexec
+
+              sudo -u postgres psql -c \"
+                DO \\\$\\\$
+                BEGIN
+                  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${DB_USER}') THEN
+                    CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASSWORD}';
+                  END IF;
+                END
+                \\\$\\\$;
+              \"
+
+              sudo -u postgres psql -c \"
+                GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};
+              \"
+
+              echo '✅ Database and user created'
+            "
+          echo "✅ Database '${{ inputs.db_name }}' and user '${{ inputs.db_user }}' ready"
+
+      # --------------------------------------------------------
+      # Write SQL seed file on runner → scp → execute on VM
+      # (avoids heredoc/YAML escaping conflicts)
+      # --------------------------------------------------------
+      - name: Write SQL Seed File
+        if: ${{ inputs.seed_sample_data == true }}
+        run: |
+          DB_NAME="${{ inputs.db_name }}"
+          DB_USER="${{ inputs.db_user }}"
+
+          cat > /tmp/seed.sql << ENDSQL
+          \connect ${DB_NAME}
+
+          -- Schema
+          CREATE SCHEMA IF NOT EXISTS sales AUTHORIZATION ${DB_USER};
+          GRANT USAGE ON SCHEMA sales TO ${DB_USER};
+
+          -- Tables
+          CREATE TABLE IF NOT EXISTS sales.customers (
+            customer_id  SERIAL        PRIMARY KEY,
+            name         VARCHAR(100)  NOT NULL,
+            email        VARCHAR(150)  UNIQUE NOT NULL,
+            country      VARCHAR(60)   NOT NULL,
+            created_at   TIMESTAMP     DEFAULT NOW()
+          );
+
+          CREATE TABLE IF NOT EXISTS sales.products (
+            product_id   SERIAL        PRIMARY KEY,
+            name         VARCHAR(100)  NOT NULL,
+            category     VARCHAR(60),
+            unit_price   NUMERIC(10,2) NOT NULL
+          );
+
+          CREATE TABLE IF NOT EXISTS sales.orders (
+            order_id     SERIAL        PRIMARY KEY,
+            customer_id  INT           REFERENCES sales.customers(customer_id),
+            product_id   INT           REFERENCES sales.products(product_id),
+            quantity     INT           NOT NULL CHECK (quantity > 0),
+            total_amount NUMERIC(12,2) NOT NULL,
+            order_date   DATE          DEFAULT CURRENT_DATE
+          );
+
+          -- Grant table permissions to app user
+          GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA sales TO ${DB_USER};
+          GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA sales TO ${DB_USER};
+
+          -- Seed: Customers
+          INSERT INTO sales.customers (name, email, country) VALUES
+            ('Alice Johnson', 'alice@example.com', 'USA'),
+            ('Bob Smith',     'bob@example.com',   'Canada'),
+            ('Clara Diaz',    'clara@example.com', 'Mexico'),
+            ('David Lee',     'david@example.com', 'UK'),
+            ('Eva Muller',    'eva@example.com',   'Germany')
+          ON CONFLICT (email) DO NOTHING;
+
+          -- Seed: Products
+          INSERT INTO sales.products (name, category, unit_price) VALUES
+            ('Laptop Pro 15',   'Electronics', 1299.99),
+            ('Wireless Mouse',  'Electronics',   29.99),
+            ('Standing Desk',   'Furniture',    499.00),
+            ('USB-C Hub',       'Electronics',   49.99),
+            ('Ergonomic Chair', 'Furniture',    349.00)
+          ON CONFLICT DO NOTHING;
+
+          -- Seed: Orders
+          INSERT INTO sales.orders (customer_id, product_id, quantity, total_amount, order_date) VALUES
+            (1, 1, 1, 1299.99, '2024-01-15'),
+            (1, 2, 2,   59.98, '2024-01-16'),
+            (2, 3, 1,  499.00, '2024-02-01'),
+            (3, 4, 3,  149.97, '2024-02-10'),
+            (4, 5, 1,  349.00, '2024-02-14'),
+            (5, 1, 1, 1299.99, '2024-03-01'),
+            (2, 2, 1,   29.99, '2024-03-05')
+          ON CONFLICT DO NOTHING;
+
+          -- Verify
+          SELECT 'customers' AS "table", COUNT(*) AS rows FROM sales.customers
+          UNION ALL SELECT 'products', COUNT(*) FROM sales.products
+          UNION ALL SELECT 'orders',   COUNT(*) FROM sales.orders;
+          ENDSQL
+
+          echo "✅ SQL seed file written"
+
+      - name: Copy SQL File to VM
+        if: ${{ inputs.seed_sample_data == true }}
+        run: |
+          gcloud compute scp /tmp/seed.sql ${{ inputs.vm_name }}:/tmp/seed.sql \
+            --zone ${{ inputs.zone }} \
+            --tunnel-through-iap
+          echo "✅ SQL file copied to VM"
+
+      - name: Execute SQL Seed on VM
+        if: ${{ inputs.seed_sample_data == true }}
+        run: |
+          gcloud compute ssh ${{ inputs.vm_name }} \
+            --zone ${{ inputs.zone }} \
+            --tunnel-through-iap \
+            --command "sudo -u postgres psql -f /tmp/seed.sql && rm /tmp/seed.sql"
+          echo "✅ Schema, tables, and seed data created"
+
+      # --------------------------------------------------------
+      # Final summary
+      # --------------------------------------------------------
+      - name: Print Connection Summary
+        run: |
+          VM_NAME="${{ inputs.vm_name }}"
+          ZONE="${{ inputs.zone }}"
+          DB_NAME="${{ inputs.db_name }}"
+          DB_USER="${{ inputs.db_user }}"
+          PG_VERSION="${{ inputs.pg_version }}"
+          SEED="${{ inputs.seed_sample_data }}"
+
+          PUBLIC_IP=$(gcloud compute instances describe ${VM_NAME} \
+            --zone ${ZONE} \
+            --format 'value(networkInterfaces[0].accessConfigs[0].natIP)')
+
+          echo ""
+          echo "=============================================="
+          echo "🎉 POSTGRESQL DEPLOYMENT SUCCESSFUL"
+          echo "=============================================="
+          echo ""
+          echo "🖥️  VM             : ${VM_NAME} (${ZONE})"
+          echo "🐘 PostgreSQL     : v${PG_VERSION}"
+          echo "🌐 Public IP      : ${PUBLIC_IP}"
+          echo "🔌 Port           : 5432"
+          echo "🗄️  Database       : ${DB_NAME}"
+          echo "👤 Superuser      : postgres"
+          echo "👤 App user       : ${DB_USER}"
+          echo "🔑 Password       : (stored in POSTGRES_PASSWORD secret)"
+          echo ""
+          echo "📋 Connection strings:"
+          echo "   # As superuser:"
+          echo "   postgresql://postgres:<password>@${PUBLIC_IP}:5432/${DB_NAME}"
+          echo ""
+          echo "   # As app user:"
+          echo "   postgresql://${DB_USER}:<password>@${PUBLIC_IP}:5432/${DB_NAME}"
+          echo ""
+          if [[ "$SEED" == "true" ]]; then
+          echo "📊 Seeded tables:"
+          echo "   • sales.customers — 5 rows"
+          echo "   • sales.products  — 5 rows"
+          echo "   • sales.orders    — 7 rows"
+          echo ""
+          fi
+          echo "🔗 pgAdmin connection settings:"
+          echo "   Host     : ${PUBLIC_IP}"
+          echo "   Port     : 5432"
+          echo "   Database : ${DB_NAME}"
+          echo "   Username : ${DB_USER}"
+          echo ""
+          echo "⚠️  SECURITY REMINDER:"
+          echo "   Once you confirm connectivity, restrict the firewall"
+          echo "   rule 'allow-postgres-5432' to your specific IP."
+          echo "=============================================="
