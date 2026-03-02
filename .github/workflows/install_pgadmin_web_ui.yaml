@@ -21,7 +21,7 @@
 #   - PGADMIN_PASSWORD    (your pgAdmin login password)
 # ============================================================
 
-name: "3 - Install pgAdmin 4 Web UI on GCP VM"
+name: "Install pgAdmin 4 Web UI on GCP VM"
 
 on:
   workflow_dispatch:
