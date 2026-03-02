@@ -253,6 +253,7 @@ jobs:
       # --------------------------------------------------------
       # Create blank database and dedicated app user
       # --------------------------------------------------------
+      # --------------------------------------------------------
       - name: Create Database and App User
         run: |
           DB_NAME="${{ inputs.db_name }}"
@@ -265,35 +266,32 @@ jobs:
             --command "
               set -e
 
-              echo '🗄️ Creating database: ${DB_NAME}...'
-              sudo -u postgres psql -c \"
-                SELECT 'CREATE DATABASE ${DB_NAME}'
-                WHERE NOT EXISTS (
-                  SELECT FROM pg_database WHERE datname = '${DB_NAME}'
-                )
-              \"\gexec
+              echo 'Creating database: ${DB_NAME}...'
+              DB_EXISTS=\$(sudo -u postgres psql -tAc \"SELECT 1 FROM pg_database WHERE datname='${DB_NAME}';\" )
+              if [[ \"\$DB_EXISTS\" == \"1\" ]]; then
+                echo 'Database ${DB_NAME} already exists, skipping.'
+              else
+                sudo -u postgres createdb ${DB_NAME}
+                echo 'Database ${DB_NAME} created.'
+              fi
 
-              echo '👤 Creating app user: ${DB_USER}...'
-              sudo -u postgres psql -c \"
-                DO \\\$\\\$
-                BEGIN
-                  IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = '${DB_USER}') THEN
-                    CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASSWORD}';
-                  END IF;
-                END
-                \\\$\\\$;
-              \"
+              echo 'Creating app user: ${DB_USER}...'
+              USER_EXISTS=\$(sudo -u postgres psql -tAc \"SELECT 1 FROM pg_roles WHERE rolname='${DB_USER}';\" )
+              if [[ \"\$USER_EXISTS\" == \"1\" ]]; then
+                echo 'User ${DB_USER} already exists, skipping.'
+              else
+                sudo -u postgres psql -c \"CREATE USER ${DB_USER} WITH PASSWORD '${DB_PASSWORD}';\"
+                echo 'User ${DB_USER} created.'
+              fi
 
-              echo '🔑 Granting privileges...'
-              sudo -u postgres psql -c \"
-                GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};
-              \"
+              echo 'Granting privileges...'
+              sudo -u postgres psql -c \"GRANT ALL PRIVILEGES ON DATABASE ${DB_NAME} TO ${DB_USER};\"
 
-              echo ''
-              echo '✅ Database and user ready:'
-              sudo -u postgres psql -c '\l ${DB_NAME}'
+              echo 'Done. Verifying...'
+              sudo -u postgres psql -tAc \"SELECT datname FROM pg_database WHERE datname='${DB_NAME}';\"
+              sudo -u postgres psql -tAc \"SELECT rolname FROM pg_roles WHERE rolname='${DB_USER}';\"
             "
-          echo "✅ Blank database '${{ inputs.db_name }}' and user '${{ inputs.db_user }}' created"
+          echo "Blank database '${{ inputs.db_name }}' and user '${{ inputs.db_user }}' created"
 
       # --------------------------------------------------------
       # Final summary
