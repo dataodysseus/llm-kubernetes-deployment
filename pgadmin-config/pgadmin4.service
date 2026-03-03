@@ -1,17 +1,15 @@
 [Unit]
 Description=pgAdmin4 Web Application
-After=network.target postgresql.service
+After=network.target
 
 [Service]
 Type=simple
 User=pgadmin
 Group=pgadmin
 WorkingDirectory=/usr/pgadmin4/web
-ExecStart=/usr/pgadmin4/venv/bin/gunicorn --bind 127.0.0.1:5050 --workers 1 --threads 25 --timeout 120 pgAdmin4:app
+ExecStart=/usr/pgadmin4/venv/bin/python /usr/pgadmin4/web/pgAdmin4.py
 Restart=always
 RestartSec=5
-StandardOutput=append:/var/log/pgadmin4/pgadmin4.log
-StandardError=append:/var/log/pgadmin4/pgadmin4.log
 
 [Install]
 WantedBy=multi-user.target
