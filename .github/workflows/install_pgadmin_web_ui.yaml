@@ -1,38 +1,29 @@
-# ============================================================
-# Workflow 3: Install pgAdmin 4 Web UI on a GCP VM
-# ============================================================
-# Purpose   : Installs pgAdmin 4 in server mode on the same
-#             VM running PostgreSQL. Accessible via browser at
-#             http://<VM-PUBLIC-IP>  (no local tools needed)
-#
-# Architecture:
-#   Browser -> VM:80 (Nginx) -> pgAdmin4 (localhost:5050)
-#                                   |
-#                            PostgreSQL (localhost:5432)
-#
-# Pre-req   : Workflows 1 + 2 must have run successfully.
-#
-# Secrets required:
-#   - GCP_PROJECT_ID
-#   - GCP_WORKLOAD_IDENTITY_PROVIDER
-#   - GCP_SERVICE_ACCOUNT
-#   - POSTGRES_PASSWORD   (from Workflow 2)
-#   - PGADMIN_EMAIL       (your pgAdmin login email)
-#   - PGADMIN_PASSWORD    (your pgAdmin login password)
-# ============================================================
-
 name: "Install pgAdmin 4 Web UI on GCP VM"
+
+# ============================================================
+# Pre-req: Workflows 1 + 2 completed. VM running with PostgreSQL.
+#
+# Also add these files to your repo under pgadmin-config/
+#   config_local.py   - pgAdmin Python config
+#   pgadmin4.service  - systemd unit file
+#   pgadmin_nginx.conf - Nginx reverse proxy config
+#   servers.json      - pre-registers Local PostgreSQL in pgAdmin
+#
+# Secrets needed:
+#   GCP_PROJECT_ID / GCP_WORKLOAD_IDENTITY_PROVIDER / GCP_SERVICE_ACCOUNT
+#   POSTGRES_PASSWORD / PGADMIN_EMAIL / PGADMIN_PASSWORD
+# ============================================================
 
 on:
   workflow_dispatch:
     inputs:
       vm_name:
-        description: "VM instance name (from Workflow 1 output)"
+        description: "VM instance name (from Workflow 1)"
         required: true
         default: "postgres-vm"
         type: string
       zone:
-        description: "GCP zone where the VM is running"
+        description: "GCP zone"
         required: true
         default: "us-central1-a"
         type: choice
@@ -46,22 +37,13 @@ on:
           - europe-west2-a
           - asia-east1-a
           - asia-southeast1-a
-      pgadmin_port:
-        description: "Internal port pgAdmin listens on (Nginx proxies 80 to this)"
-        required: true
-        default: "5050"
-        type: choice
-        options:
-          - "5050"
-          - "5051"
-          - "8080"
       db_name:
-        description: "Database name to pre-register in pgAdmin"
+        description: "Database name (must match servers.json MaintenanceDB)"
         required: true
         default: "appdb"
         type: string
       db_user:
-        description: "Database user for pgAdmin server registration"
+        description: "Database user (must match servers.json Username)"
         required: true
         default: "appuser"
         type: string
@@ -99,7 +81,7 @@ jobs:
             --zone ${{ inputs.zone }} \
             --format 'value(status)' 2>/dev/null || echo "NOT_FOUND")
           if [[ "$STATUS" != "RUNNING" ]]; then
-            echo "VM is $STATUS — must be RUNNING. Run Workflow 1 first."
+            echo "VM is $STATUS - must be RUNNING. Run Workflow 1 first."
             exit 1
           fi
           echo "VM ${{ inputs.vm_name }} is RUNNING"
@@ -120,7 +102,6 @@ jobs:
               --description "Allow HTTP access to pgAdmin web UI"
             echo "Port 80 opened"
           fi
-
           EXISTING_TAGS=$(gcloud compute instances describe ${{ inputs.vm_name }} \
             --zone ${{ inputs.zone }} \
             --format 'value(tags.items)')
@@ -134,119 +115,109 @@ jobs:
           fi
 
       # --------------------------------------------------------
-      # Install pgAdmin 4
+      # Install pgAdmin4-server package on VM
       # --------------------------------------------------------
-      - name: Install pgAdmin 4
-        run: |
-          PGADMIN_EMAIL="${{ secrets.PGADMIN_EMAIL }}"
-          PGADMIN_PASSWORD="${{ secrets.PGADMIN_PASSWORD }}"
-
-          gcloud compute ssh ${{ inputs.vm_name }} \
-            --zone ${{ inputs.zone }} \
-            --tunnel-through-iap \
-            --command "
-              set -e
-              echo 'Adding pgAdmin 4 apt repository...'
-              curl -fsSL https://www.pgadmin.org/static/packages_pgadmin_org.pub \
-                | sudo gpg --batch --yes --no-tty --dearmor \
-                -o /etc/apt/trusted.gpg.d/pgadmin.gpg
-              sudo sh -c 'echo \"deb https://ftp.postgresql.org/pub/pgadmin/pgadmin4/apt/jammy pgadmin4 main\" > /etc/apt/sources.list.d/pgadmin4.list'
-              sudo apt-get update -qq
-              echo 'Installing pgadmin4-web...'
-              sudo apt-get install -y pgadmin4-web
-              echo 'Running pgAdmin setup...'
-              sudo PGADMIN_SETUP_EMAIL='${PGADMIN_EMAIL}' PGADMIN_SETUP_PASSWORD='${PGADMIN_PASSWORD}' /usr/pgadmin4/bin/setup-web.sh --yes
-              echo 'pgAdmin 4 installed'
-            "
-          echo "pgAdmin 4 installed successfully"
-
-      # --------------------------------------------------------
-      # Write nginx config locally then scp to VM
-      # (completely avoids heredoc-inside-YAML issues)
-      # --------------------------------------------------------
-      - name: Write Nginx Config File
-        run: |
-          PGADMIN_PORT="${{ inputs.pgadmin_port }}"
-          printf 'server {\n    listen 80;\n    server_name _;\n\n    location / {\n        proxy_pass http://127.0.0.1:%s/;\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto $scheme;\n        proxy_read_timeout 300;\n        proxy_connect_timeout 300;\n    }\n}\n' "$PGADMIN_PORT" > /tmp/pgadmin_nginx.conf
-          echo "Nginx config written:"
-          cat /tmp/pgadmin_nginx.conf
-
-      - name: Copy Nginx Config to VM
-        run: |
-          gcloud compute scp /tmp/pgadmin_nginx.conf ${{ inputs.vm_name }}:/tmp/pgadmin_nginx.conf \
-            --zone ${{ inputs.zone }} \
-            --tunnel-through-iap
-          echo "Nginx config copied to VM"
-
-      - name: Apply Nginx Config on VM
+      - name: Install pgAdmin4-server
         run: |
           gcloud compute ssh ${{ inputs.vm_name }} \
             --zone ${{ inputs.zone }} \
             --tunnel-through-iap \
-            --command "
-              set -e
-
-              echo 'Stopping Apache2 (installed by pgAdmin setup-web.sh on port 80)...'
-              sudo systemctl stop apache2 || true
-              sudo systemctl disable apache2 || true
-
-              echo 'Installing Nginx...'
-              sudo apt-get install -y nginx
-
-              echo 'Applying pgAdmin Nginx config...'
-              sudo mv /tmp/pgadmin_nginx.conf /etc/nginx/sites-available/pgadmin
-              sudo ln -sf /etc/nginx/sites-available/pgadmin /etc/nginx/sites-enabled/pgadmin
-              sudo rm -f /etc/nginx/sites-enabled/default
-
-              sudo nginx -t
-              sudo systemctl enable nginx
-              sudo systemctl restart nginx
-
-              echo 'Nginx running on port 80'
-            "
-          echo "Nginx reverse proxy configured"
+            --command "set -e &&
+              curl -fsSL https://www.pgadmin.org/static/packages_pgadmin_org.pub |
+                sudo gpg --batch --yes --no-tty --dearmor -o /etc/apt/trusted.gpg.d/pgadmin.gpg &&
+              sudo sh -c 'echo \"deb https://ftp.postgresql.org/pub/pgadmin/pgadmin4/apt/jammy pgadmin4 main\" > /etc/apt/sources.list.d/pgadmin4.list' &&
+              sudo apt-get update -qq &&
+              sudo apt-get install -y pgadmin4-server &&
+              sudo useradd -r -s /usr/sbin/nologin pgadmin 2>/dev/null || true &&
+              sudo mkdir -p /var/lib/pgadmin4 /var/log/pgadmin4 &&
+              sudo chown -R pgadmin:pgadmin /var/lib/pgadmin4 /var/log/pgadmin4 &&
+              echo pgAdmin4-server installed"
+          echo "pgAdmin4-server installed"
 
       # --------------------------------------------------------
-      # Write servers.json and pgpass locally then scp to VM
+      # Copy all config files from repo to VM via scp
       # --------------------------------------------------------
-      - name: Write pgAdmin Server Registration Files
+      - name: Copy Config Files to VM
         run: |
-          DB_NAME="${{ inputs.db_name }}"
-          DB_USER="${{ inputs.db_user }}"
-          DB_PASSWORD="${{ secrets.POSTGRES_PASSWORD }}"
+          for f in config_local.py pgadmin4.service pgadmin_nginx.conf servers.json; do
+            gcloud compute scp pgadmin-config/$f ${{ inputs.vm_name }}:/tmp/$f \
+              --zone ${{ inputs.zone }} \
+              --tunnel-through-iap
+            echo "Copied $f"
+          done
 
-          printf '{\n  "Servers": {\n    "1": {\n      "Name": "Local PostgreSQL",\n      "Group": "Servers",\n      "Host": "localhost",\n      "Port": 5432,\n      "MaintenanceDB": "%s",\n      "Username": "%s",\n      "SSLMode": "prefer",\n      "PassFile": "/var/lib/pgadmin4/pgpass"\n    }\n  }\n}\n' "$DB_NAME" "$DB_USER" > /tmp/servers.json
-
-          printf 'localhost:5432:*:%s:%s\n' "$DB_USER" "$DB_PASSWORD" > /tmp/pgpass
-
-          echo "Registration files written"
-          cat /tmp/servers.json
-
-      - name: Copy Registration Files to VM
+      # --------------------------------------------------------
+      # Write pgpass on runner (contains secret) then scp
+      # --------------------------------------------------------
+      - name: Write and Copy pgpass
         run: |
-          gcloud compute scp /tmp/servers.json ${{ inputs.vm_name }}:/tmp/servers.json \
-            --zone ${{ inputs.zone }} \
-            --tunnel-through-iap
+          echo "localhost:5432:*:${{ inputs.db_user }}:${{ secrets.POSTGRES_PASSWORD }}" > /tmp/pgpass
+          chmod 600 /tmp/pgpass
           gcloud compute scp /tmp/pgpass ${{ inputs.vm_name }}:/tmp/pgpass \
             --zone ${{ inputs.zone }} \
             --tunnel-through-iap
-          echo "Registration files copied to VM"
+          echo "pgpass copied"
 
-      - name: Apply Registration Files on VM
+      # --------------------------------------------------------
+      # Initialise pgAdmin DB and create admin user
+      # --------------------------------------------------------
+      - name: Initialise pgAdmin Database
         run: |
           gcloud compute ssh ${{ inputs.vm_name }} \
             --zone ${{ inputs.zone }} \
             --tunnel-through-iap \
-            --command "
-              set -e
-              sudo mkdir -p /var/lib/pgadmin4
-              sudo mv /tmp/servers.json /var/lib/pgadmin4/servers.json
-              sudo mv /tmp/pgpass /var/lib/pgadmin4/pgpass
-              sudo chmod 600 /var/lib/pgadmin4/pgpass
-              sudo chown www-data:www-data /var/lib/pgadmin4/pgpass /var/lib/pgadmin4/servers.json
-              echo 'Server pre-registered in pgAdmin'
-            "
-          echo "PostgreSQL server pre-registered in pgAdmin"
+            --command "set -e &&
+              sudo cp /tmp/config_local.py /usr/pgadmin4/web/config_local.py &&
+              cd /usr/pgadmin4/web &&
+              sudo -u pgadmin env
+                PGADMIN_SETUP_EMAIL='${{ secrets.PGADMIN_EMAIL }}'
+                PGADMIN_SETUP_PASSWORD='${{ secrets.PGADMIN_PASSWORD }}'
+                python3 setup.py &&
+              echo pgAdmin DB initialised"
+          echo "pgAdmin database initialised"
+
+      # --------------------------------------------------------
+      # Install and start pgAdmin4 as systemd service
+      # --------------------------------------------------------
+      - name: Start pgAdmin4 Service
+        run: |
+          gcloud compute ssh ${{ inputs.vm_name }} \
+            --zone ${{ inputs.zone }} \
+            --tunnel-through-iap \
+            --command "set -e &&
+              sudo mv /tmp/pgadmin4.service /etc/systemd/system/pgadmin4.service &&
+              sudo systemctl daemon-reload &&
+              sudo systemctl enable pgadmin4 &&
+              sudo systemctl start pgadmin4 &&
+              sleep 4 &&
+              sudo systemctl status pgadmin4 --no-pager &&
+              sudo mv /tmp/servers.json /var/lib/pgadmin4/servers.json &&
+              sudo mv /tmp/pgpass /var/lib/pgadmin4/pgpass &&
+              sudo chmod 600 /var/lib/pgadmin4/pgpass &&
+              sudo chown pgadmin:pgadmin /var/lib/pgadmin4/servers.json /var/lib/pgadmin4/pgpass &&
+              echo pgAdmin4 service running"
+          echo "pgAdmin4 service started"
+
+      # --------------------------------------------------------
+      # Install Nginx and apply reverse proxy config
+      # --------------------------------------------------------
+      - name: Start Nginx
+        run: |
+          gcloud compute ssh ${{ inputs.vm_name }} \
+            --zone ${{ inputs.zone }} \
+            --tunnel-through-iap \
+            --command "set -e &&
+              sudo systemctl stop apache2 2>/dev/null || true &&
+              sudo systemctl disable apache2 2>/dev/null || true &&
+              sudo apt-get install -y nginx &&
+              sudo mv /tmp/pgadmin_nginx.conf /etc/nginx/sites-available/pgadmin &&
+              sudo ln -sf /etc/nginx/sites-available/pgadmin /etc/nginx/sites-enabled/pgadmin &&
+              sudo rm -f /etc/nginx/sites-enabled/default &&
+              sudo nginx -t &&
+              sudo systemctl enable nginx &&
+              sudo systemctl restart nginx &&
+              echo Nginx running"
+          echo "Nginx started"
 
       # --------------------------------------------------------
       # Smoke test
@@ -256,18 +227,16 @@ jobs:
           gcloud compute ssh ${{ inputs.vm_name }} \
             --zone ${{ inputs.zone }} \
             --tunnel-through-iap \
-            --command "
-              sleep 3
-              HTTP_CODE=\$(curl -s -o /dev/null -w '%{http_code}' http://localhost/)
-              echo \"pgAdmin HTTP response: \${HTTP_CODE}\"
-              if [[ \"\${HTTP_CODE}\" == \"200\" || \"\${HTTP_CODE}\" == \"302\" ]]; then
-                echo 'pgAdmin is responding correctly'
+            --command "sleep 5 &&
+              HTTP_CODE=\$(curl -s -o /dev/null -w '%{http_code}' http://localhost/) &&
+              echo HTTP response: \$HTTP_CODE &&
+              if [[ \"\$HTTP_CODE\" == \"200\" || \"\$HTTP_CODE\" == \"302\" ]]; then
+                echo pgAdmin is responding correctly
               else
-                echo 'Unexpected response. Checking service status...'
-                sudo systemctl status nginx --no-pager || true
+                sudo journalctl -u pgadmin4 --no-pager -n 30 || true
+                sudo tail -20 /var/log/pgadmin4/pgadmin4.log || true
                 exit 1
-              fi
-            "
+              fi"
           echo "pgAdmin smoke test passed"
 
       # --------------------------------------------------------
@@ -278,29 +247,14 @@ jobs:
           PUBLIC_IP=$(gcloud compute instances describe ${{ inputs.vm_name }} \
             --zone ${{ inputs.zone }} \
             --format 'value(networkInterfaces[0].accessConfigs[0].natIP)')
-
           echo ""
           echo "=============================================="
           echo "PGADMIN 4 WEB UI READY"
           echo "=============================================="
-          echo ""
-          echo "Open in your browser:"
-          echo "   http://${PUBLIC_IP}"
-          echo ""
-          echo "Login credentials:"
-          echo "   Email    : (stored in PGADMIN_EMAIL secret)"
-          echo "   Password : (stored in PGADMIN_PASSWORD secret)"
-          echo ""
-          echo "Pre-registered server:"
-          echo "   Name     : Local PostgreSQL"
-          echo "   Host     : localhost (same VM)"
-          echo "   Database : ${{ inputs.db_name }}"
-          echo "   User     : ${{ inputs.db_user }}"
-          echo ""
-          echo "Architecture:"
-          echo "   Browser -> ${PUBLIC_IP}:80 (Nginx) -> pgAdmin4 (:${{ inputs.pgadmin_port }}) -> PostgreSQL (:5432)"
-          echo ""
-          echo "SECURITY REMINDERS:"
-          echo "   Restrict port 80 firewall rule to your IP after confirming access"
-          echo "   Consider adding HTTPS via certbot for production use"
+          echo "Open in your browser : http://${PUBLIC_IP}"
+          echo "Login email          : (PGADMIN_EMAIL secret)"
+          echo "Login password       : (PGADMIN_PASSWORD secret)"
+          echo "Pre-registered DB    : ${{ inputs.db_name }} as ${{ inputs.db_user }}"
+          echo "Architecture         : Browser -> ${PUBLIC_IP}:80 -> pgAdmin4 (:5050) -> PostgreSQL (:5432)"
+          echo "REMINDER             : Restrict allow-http-80 firewall rule to your IP"
           echo "=============================================="
