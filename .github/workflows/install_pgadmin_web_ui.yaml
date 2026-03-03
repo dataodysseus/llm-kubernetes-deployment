@@ -172,7 +172,7 @@ jobs:
               sudo -u pgadmin env
                 PGADMIN_SETUP_EMAIL='${{ secrets.PGADMIN_EMAIL }}'
                 PGADMIN_SETUP_PASSWORD='${{ secrets.PGADMIN_PASSWORD }}'
-                python3 setup.py &&
+                /usr/pgadmin4/venv/bin/python setup.py &&
               echo pgAdmin DB initialised"
           echo "pgAdmin database initialised"
 
