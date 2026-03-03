@@ -168,8 +168,9 @@ jobs:
             --tunnel-through-iap \
             --command "set -e &&
               sudo cp /tmp/config_local.py /usr/pgadmin4/web/config_local.py &&
-              cd /usr/pgadmin4/web &&
-              sudo -u pgadmin /usr/pgadmin4/venv/bin/python setup.py create-admin --email '${{ secrets.PGADMIN_EMAIL }}' --password '${{ secrets.PGADMIN_PASSWORD }}' &&
+              sudo /usr/pgadmin4/bin/setup-web.sh --yes \
+                --email '${{ secrets.PGADMIN_EMAIL }}' \
+                --password '${{ secrets.PGADMIN_PASSWORD }}' &&
               echo pgAdmin DB initialised"
           echo "pgAdmin database initialised"
 
