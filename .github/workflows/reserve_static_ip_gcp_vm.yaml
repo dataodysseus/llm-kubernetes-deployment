@@ -1,4 +1,4 @@
-name: "4 - Reserve and Assign Static IP to GCP VM"
+name: "Reserve and Assign Static IP to GCP VM"
 
 # ============================================================
 # Purpose   : Reserves a static external IP in GCP and assigns
