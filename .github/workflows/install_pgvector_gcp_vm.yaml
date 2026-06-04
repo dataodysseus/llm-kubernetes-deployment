@@ -1,0 +1,206 @@
+name: "Install pgvector and Create Vector Store"
+
+on:
+  workflow_dispatch:
+    inputs:
+      vm_name:
+        description: "VM instance name (from Workflow 1)"
+        required: true
+        default: "postgres-vm"
+        type: string
+      zone:
+        description: "GCP zone where the VM is running"
+        required: true
+        default: "us-central1-a"
+        type: choice
+        options:
+          - us-central1-a
+          - us-central1-b
+          - us-east1-b
+          - us-east1-c
+          - us-west1-a
+          - europe-west1-b
+          - europe-west2-a
+          - asia-east1-a
+          - asia-southeast1-a
+      pg_version:
+        description: "PostgreSQL version installed on the VM"
+        required: true
+        default: "15"
+        type: choice
+        options:
+          - "15"
+          - "16"
+          - "14"
+      vector_dimensions:
+        description: "Embedding dimensions (384=MiniLM, 768=BGE/Nomic, 1536=OpenAI ada-002, 3072=OpenAI large)"
+        required: true
+        default: "1536"
+        type: choice
+        options:
+          - "384"
+          - "768"
+          - "1536"
+          - "3072"
+      db_name:
+        description: "Database to install pgvector into"
+        required: true
+        default: "appdb"
+        type: string
+      db_user:
+        description: "Database user to grant vector table access to"
+        required: true
+        default: "appuser"
+        type: string
+
+jobs:
+  install-pgvector:
+    name: "pgvector ${{ inputs.vector_dimensions }}d -> ${{ inputs.db_name }}"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Authenticate with Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+          workload_identity_provider: "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}"
+          service_account: "${{ secrets.GCP_SERVICE_ACCOUNT }}"
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+
+      - name: Verify Target VM is Running
+        run: |
+          STATUS=$(gcloud compute instances describe ${{ inputs.vm_name }} \
+            --zone ${{ inputs.zone }} \
+            --format 'value(status)' 2>/dev/null || echo "NOT_FOUND")
+          if [[ "$STATUS" != "RUNNING" ]]; then
+            echo "VM is $STATUS - must be RUNNING."
+            exit 1
+          fi
+          echo "VM ${{ inputs.vm_name }} is RUNNING"
+
+      # --------------------------------------------------------
+      # Install pgvector apt package
+      # --------------------------------------------------------
+      - name: Install pgvector
+        run: |
+          PG_VERSION="${{ inputs.pg_version }}"
+          gcloud compute ssh ${{ inputs.vm_name }} \
+            --zone ${{ inputs.zone }} \
+            --tunnel-through-iap \
+            --command "set -e &&
+              while sudo fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/cache/apt/archives/lock 2>/dev/null; do
+                echo 'apt is locked, waiting 10s...' && sleep 10
+              done &&
+              sudo apt-get update -qq &&
+              sudo apt-get install -y postgresql-${PG_VERSION}-pgvector &&
+              echo pgvector installed"
+          echo "pgvector package installed"
+
+      # --------------------------------------------------------
+      # Substitute placeholders in SQL files, then scp to VM
+      # All SQL stored as repo files under pgvector-config/
+      # --------------------------------------------------------
+      - name: Prepare SQL Files
+        run: |
+          DIMS="${{ inputs.vector_dimensions }}"
+          DB_USER="${{ inputs.db_user }}"
+
+          cp pgvector-config/setup_vector_store.sql /tmp/setup_vector_store.sql
+          cp pgvector-config/test_vectors.sql /tmp/test_vectors.sql
+
+          sed -i "s/PGVECTOR_DIMS/${DIMS}/g"   /tmp/setup_vector_store.sql
+          sed -i "s/PGVECTOR_USER/${DB_USER}/g" /tmp/setup_vector_store.sql
+
+          ZERO_VEC=$(python3 -c "print('[' + ','.join(['0.1']*${DIMS}) + ']')")
+          sed -i "s|PGVECTOR_ZERO_VEC|'${ZERO_VEC}'|g" /tmp/test_vectors.sql
+
+          echo "SQL files prepared"
+          echo "Setup SQL:"
+          cat /tmp/setup_vector_store.sql
+
+      - name: Copy SQL Files to VM
+        run: |
+          for f in setup_vector_store.sql test_vectors.sql; do
+            gcloud compute scp /tmp/$f ${{ inputs.vm_name }}:/tmp/$f \
+              --zone ${{ inputs.zone }} \
+              --tunnel-through-iap
+            echo "Copied $f"
+          done
+
+      # --------------------------------------------------------
+      # Execute SQL on VM
+      # --------------------------------------------------------
+      - name: Create Vector Store Schema
+        run: |
+          gcloud compute ssh ${{ inputs.vm_name }} \
+            --zone ${{ inputs.zone }} \
+            --tunnel-through-iap \
+            --command "sudo -u postgres psql -d ${{ inputs.db_name }} -f /tmp/setup_vector_store.sql && rm /tmp/setup_vector_store.sql"
+          echo "Vector store schema created"
+
+      - name: Run Sanity Test
+        run: |
+          gcloud compute ssh ${{ inputs.vm_name }} \
+            --zone ${{ inputs.zone }} \
+            --tunnel-through-iap \
+            --command "sudo -u postgres psql -d ${{ inputs.db_name }} -f /tmp/test_vectors.sql && rm /tmp/test_vectors.sql"
+          echo "Sanity test passed - 3 dummy documents inserted"
+
+      # --------------------------------------------------------
+      # Summary
+      # --------------------------------------------------------
+      - name: Print Summary
+        run: |
+          DIMS="${{ inputs.vector_dimensions }}"
+          DB_NAME="${{ inputs.db_name }}"
+          DB_USER="${{ inputs.db_user }}"
+
+          echo ""
+          echo "=============================================="
+          echo "PGVECTOR SETUP COMPLETE"
+          echo "=============================================="
+          echo ""
+          echo "Extension  : pgvector"
+          echo "Database   : ${DB_NAME}"
+          echo "Schema     : vectors"
+          echo "Table      : vectors.documents"
+          echo "Dimensions : ${DIMS}"
+          echo "Index      : HNSW cosine distance"
+          echo ""
+          echo "Table structure:"
+          echo "  id         SERIAL PRIMARY KEY"
+          echo "  content    TEXT            <- original text"
+          echo "  embedding  vector(${DIMS}) <- the embedding vector"
+          echo "  metadata   JSONB           <- flexible extra fields"
+          echo "  created_at TIMESTAMP"
+          echo ""
+          echo "Try these in pgAdmin Query Tool:"
+          echo ""
+          echo "  SELECT id, content, metadata"
+          echo "  FROM vectors.documents;"
+          echo ""
+          echo "  SELECT content,"
+          echo "         1 - (embedding <=> embedding) AS similarity"
+          echo "  FROM vectors.documents"
+          echo "  ORDER BY embedding <=> embedding"
+          echo "  LIMIT 5;"
+          echo ""
+          echo "Next steps:"
+          echo "  1. Pick an embedding model:"
+          echo "     - OpenAI text-embedding-3-small (1536d, API key needed)"
+          echo "     - sentence-transformers/all-MiniLM-L6-v2 (384d, free, local)"
+          echo "     - nomic-embed-text (768d, free, local)"
+          echo "  2. Generate real embeddings for your text"
+          echo "  3. INSERT rows with real vectors"
+          echo "  4. Query by similarity using the <=> operator"
+          echo "=============================================="
