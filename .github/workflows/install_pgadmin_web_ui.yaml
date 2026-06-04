@@ -123,6 +123,11 @@ jobs:
             --zone ${{ inputs.zone }} \
             --tunnel-through-iap \
             --command "set -e &&
+              echo 'Waiting for apt lock...' &&
+              while sudo fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/cache/apt/archives/lock 2>/dev/null; do
+                echo 'apt is locked, waiting 10s...'
+                sleep 10
+              done &&
               curl -fsSL https://www.pgadmin.org/static/packages_pgadmin_org.pub |
                 sudo gpg --batch --yes --no-tty --dearmor -o /etc/apt/trusted.gpg.d/pgadmin.gpg &&
               sudo sh -c 'echo \"deb https://ftp.postgresql.org/pub/pgadmin/pgadmin4/apt/jammy pgadmin4 main\" > /etc/apt/sources.list.d/pgadmin4.list' &&
@@ -168,9 +173,8 @@ jobs:
             --tunnel-through-iap \
             --command "set -e &&
               sudo cp /tmp/config_local.py /usr/pgadmin4/web/config_local.py &&
-              sudo PGADMIN_SETUP_EMAIL='${{ secrets.PGADMIN_EMAIL }}' \
-                  PGADMIN_SETUP_PASSWORD='${{ secrets.PGADMIN_PASSWORD }}' \
-                  /usr/pgadmin4/bin/setup-web.sh --yes &&
+              cd /usr/pgadmin4/web &&
+              sudo -u pgadmin /usr/pgadmin4/venv/bin/python setup.py create-admin --email '${{ secrets.PGADMIN_EMAIL }}' --password '${{ secrets.PGADMIN_PASSWORD }}' &&
               echo pgAdmin DB initialised"
           echo "pgAdmin database initialised"
 
@@ -205,6 +209,12 @@ jobs:
             --zone ${{ inputs.zone }} \
             --tunnel-through-iap \
             --command "set -e &&
+              echo 'Waiting for apt lock to be released...' &&
+              while sudo fuser /var/lib/dpkg/lock-frontend /var/lib/apt/lists/lock /var/cache/apt/archives/lock 2>/dev/null; do
+                echo 'apt is locked by another process, waiting 10s...'
+                sleep 10
+              done &&
+              echo 'apt lock released' &&
               sudo systemctl stop apache2 2>/dev/null || true &&
               sudo systemctl disable apache2 2>/dev/null || true &&
               sudo apt-get install -y nginx &&
