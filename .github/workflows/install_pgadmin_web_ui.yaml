@@ -173,12 +173,13 @@ jobs:
             --tunnel-through-iap \
             --command "set -e &&
               sudo cp /tmp/config_local.py /usr/pgadmin4/web/config_local.py &&
-              cd /usr/pgadmin4/web &&
-              sudo -u pgadmin /usr/pgadmin4/venv/bin/python setup.py create-admin --email '${{ secrets.PGADMIN_EMAIL }}' --password '${{ secrets.PGADMIN_PASSWORD }}' &&
+              sudo PGADMIN_SETUP_EMAIL='${{ secrets.PGADMIN_EMAIL }}' \
+                PGADMIN_SETUP_PASSWORD='${{ secrets.PGADMIN_PASSWORD }}' \
+                /usr/pgadmin4/bin/setup-web.sh --yes &&
               echo pgAdmin DB initialised"
           echo "pgAdmin database initialised"
 
-      # --------------------------------------------------------
+            # --------------------------------------------------------
       # Install and start pgAdmin4 as systemd service
       # --------------------------------------------------------
       - name: Start pgAdmin4 Service
