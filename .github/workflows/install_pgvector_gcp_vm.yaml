@@ -33,7 +33,7 @@ on:
           - "16"
           - "14"
       vector_dimensions:
-        description: "Embedding dimensions (384=MiniLM, 768=BGE/Nomic, 1536=OpenAI ada-002, 3072=OpenAI large)"
+        description: "Embedding dimensions (384=MiniLM, 768=BGE/Nomic, 1024=BGE/BAAI, 1536=OpenAI ada-002, 3072=OpenAI large)"
         required: true
         default: "1536"
         type: choice
@@ -41,6 +41,7 @@ on:
           - "384"
           - "768"
           - "1536"
+          - "1024"
           - "3072"
       db_name:
         description: "Database to install pgvector into"
