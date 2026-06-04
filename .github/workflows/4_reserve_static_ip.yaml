@@ -1,0 +1,247 @@
+name: "4 - Reserve and Assign Static IP to GCP VM"
+
+# ============================================================
+# Purpose   : Reserves a static external IP in GCP and assigns
+#             it to an existing VM, replacing the ephemeral IP.
+#             After this runs, the VM IP never changes on
+#             stop/start — your pgAdmin URL stays permanent.
+#
+# Pre-req   : Workflow 1 (VM must exist and be RUNNING)
+#
+# Secrets required:
+#   - GCP_PROJECT_ID
+#   - GCP_WORKLOAD_IDENTITY_PROVIDER
+#   - GCP_SERVICE_ACCOUNT
+#
+# Required IAM roles on service account:
+#   - Compute Admin
+# ============================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      vm_name:
+        description: "VM instance name (from Workflow 1)"
+        required: true
+        default: "postgres-vm"
+        type: string
+      zone:
+        description: "GCP zone where the VM is running"
+        required: true
+        default: "us-central1-a"
+        type: choice
+        options:
+          - us-central1-a
+          - us-central1-b
+          - us-east1-b
+          - us-east1-c
+          - us-west1-a
+          - europe-west1-b
+          - europe-west2-a
+          - asia-east1-a
+          - asia-southeast1-a
+      region:
+        description: "GCP region (must match zone prefix)"
+        required: true
+        default: "us-central1"
+        type: choice
+        options:
+          - us-central1
+          - us-east1
+          - us-west1
+          - europe-west1
+          - europe-west2
+          - asia-east1
+          - asia-southeast1
+      static_ip_name:
+        description: "Name for the reserved static IP address"
+        required: true
+        default: "postgres-vm-static-ip"
+        type: string
+
+jobs:
+  reserve-static-ip:
+    name: "Static IP -> ${{ inputs.vm_name }}"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Authenticate with Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+          workload_identity_provider: "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}"
+          service_account: "${{ secrets.GCP_SERVICE_ACCOUNT }}"
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+
+      # --------------------------------------------------------
+      # Pre-flight: confirm VM exists and is running
+      # --------------------------------------------------------
+      - name: Verify Target VM is Running
+        run: |
+          VM_NAME="${{ inputs.vm_name }}"
+          ZONE="${{ inputs.zone }}"
+
+          STATUS=$(gcloud compute instances describe ${VM_NAME} \
+            --zone ${ZONE} \
+            --format 'value(status)' 2>/dev/null || echo "NOT_FOUND")
+
+          if [[ "$STATUS" == "NOT_FOUND" ]]; then
+            echo "VM '${VM_NAME}' not found. Run Workflow 1 first."
+            exit 1
+          fi
+
+          if [[ "$STATUS" != "RUNNING" ]]; then
+            echo "VM '${VM_NAME}' is ${STATUS} — must be RUNNING."
+            exit 1
+          fi
+
+          echo "VM '${VM_NAME}' is RUNNING"
+
+      # --------------------------------------------------------
+      # Step 1: Reserve a static regional IP (or reuse existing)
+      # --------------------------------------------------------
+      - name: Reserve Static IP Address
+        run: |
+          IP_NAME="${{ inputs.static_ip_name }}"
+          REGION="${{ inputs.region }}"
+
+          EXISTING=$(gcloud compute addresses describe ${IP_NAME} \
+            --region ${REGION} \
+            --format 'value(address)' 2>/dev/null || echo "")
+
+          if [[ -n "$EXISTING" ]]; then
+            echo "Static IP '${IP_NAME}' already reserved: ${EXISTING}"
+            echo "Reusing existing reservation."
+          else
+            echo "Reserving new static IP '${IP_NAME}' in ${REGION}..."
+            gcloud compute addresses create ${IP_NAME} \
+              --region ${REGION} \
+              --network-tier PREMIUM \
+              --description "Static IP for ${{ inputs.vm_name }}"
+            echo "Static IP reserved"
+          fi
+
+          STATIC_IP=$(gcloud compute addresses describe ${IP_NAME} \
+            --region ${REGION} \
+            --format 'value(address)')
+          echo "Reserved IP: ${STATIC_IP}"
+          echo "STATIC_IP=${STATIC_IP}" >> $GITHUB_ENV
+
+      # --------------------------------------------------------
+      # Step 2: Get the current access config name on the VM NIC
+      # --------------------------------------------------------
+      - name: Get Current Access Config Name
+        run: |
+          VM_NAME="${{ inputs.vm_name }}"
+          ZONE="${{ inputs.zone }}"
+
+          ACCESS_CONFIG=$(gcloud compute instances describe ${VM_NAME} \
+            --zone ${ZONE} \
+            --format 'value(networkInterfaces[0].accessConfigs[0].name)')
+
+          echo "Current access config: ${ACCESS_CONFIG}"
+          echo "ACCESS_CONFIG=${ACCESS_CONFIG}" >> $GITHUB_ENV
+
+      # --------------------------------------------------------
+      # Step 3: Delete the ephemeral IP access config
+      # --------------------------------------------------------
+      - name: Remove Ephemeral IP from VM
+        run: |
+          VM_NAME="${{ inputs.vm_name }}"
+          ZONE="${{ inputs.zone }}"
+          ACCESS_CONFIG="${{ env.ACCESS_CONFIG }}"
+
+          # Check if there is an existing external IP to remove
+          CURRENT_IP=$(gcloud compute instances describe ${VM_NAME} \
+            --zone ${ZONE} \
+            --format 'value(networkInterfaces[0].accessConfigs[0].natIP)' 2>/dev/null || echo "")
+
+          if [[ -z "$CURRENT_IP" ]]; then
+            echo "No external IP currently assigned — skipping removal."
+          else
+            echo "Removing current IP (${CURRENT_IP}) access config..."
+            gcloud compute instances delete-access-config ${VM_NAME} \
+              --zone ${ZONE} \
+              --access-config-name "${ACCESS_CONFIG}"
+            echo "Ephemeral IP removed"
+          fi
+
+      # --------------------------------------------------------
+      # Step 4: Assign the reserved static IP to the VM
+      # --------------------------------------------------------
+      - name: Assign Static IP to VM
+        run: |
+          VM_NAME="${{ inputs.vm_name }}"
+          ZONE="${{ inputs.zone }}"
+          STATIC_IP="${{ env.STATIC_IP }}"
+          IP_NAME="${{ inputs.static_ip_name }}"
+
+          echo "Assigning static IP ${STATIC_IP} to VM ${VM_NAME}..."
+          gcloud compute instances add-access-config ${VM_NAME} \
+            --zone ${ZONE} \
+            --access-config-name "External NAT" \
+            --address ${STATIC_IP}
+
+          echo "Static IP assigned"
+
+      # --------------------------------------------------------
+      # Step 5: Verify the assignment
+      # --------------------------------------------------------
+      - name: Verify Static IP Assignment
+        run: |
+          VM_NAME="${{ inputs.vm_name }}"
+          ZONE="${{ inputs.zone }}"
+          STATIC_IP="${{ env.STATIC_IP }}"
+
+          sleep 5
+
+          ASSIGNED_IP=$(gcloud compute instances describe ${VM_NAME} \
+            --zone ${ZONE} \
+            --format 'value(networkInterfaces[0].accessConfigs[0].natIP)')
+
+          if [[ "$ASSIGNED_IP" == "$STATIC_IP" ]]; then
+            echo "Verified: VM is using static IP ${ASSIGNED_IP}"
+          else
+            echo "Warning: assigned IP ${ASSIGNED_IP} does not match expected ${STATIC_IP}"
+            exit 1
+          fi
+
+      # --------------------------------------------------------
+      # Summary
+      # --------------------------------------------------------
+      - name: Print Summary
+        run: |
+          VM_NAME="${{ inputs.vm_name }}"
+          ZONE="${{ inputs.zone }}"
+          STATIC_IP="${{ env.STATIC_IP }}"
+          IP_NAME="${{ inputs.static_ip_name }}"
+
+          echo ""
+          echo "=============================================="
+          echo "STATIC IP ASSIGNED SUCCESSFULLY"
+          echo "=============================================="
+          echo ""
+          echo "VM            : ${VM_NAME} (${ZONE})"
+          echo "Static IP     : ${STATIC_IP}  <- this never changes"
+          echo "IP name       : ${IP_NAME} (GCP resource name)"
+          echo ""
+          echo "Permanent URLs:"
+          echo "  pgAdmin UI  : http://${STATIC_IP}"
+          echo "  PostgreSQL  : postgresql://appuser:<password>@${STATIC_IP}:5432/appdb"
+          echo ""
+          echo "Note: This static IP is billed at ~$0.01/hr when the VM"
+          echo "is STOPPED. It is free while the VM is RUNNING."
+          echo ""
+          echo "To release it later (stop billing):"
+          echo "  gcloud compute addresses delete ${IP_NAME} --region ${{ inputs.region }}"
+          echo "=============================================="
