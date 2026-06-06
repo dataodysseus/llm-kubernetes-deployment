@@ -23,9 +23,10 @@ from typing import Any
 
 import psycopg2
 import psycopg2.pool
-from fastapi import FastAPI
+from fastapi import FastAPI, Request, Response
 from fastapi.responses import JSONResponse
 from mcp.server.fastmcp import FastMCP
+from mcp.server.streamable_http import StreamableHTTPServerTransport
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -423,7 +424,12 @@ async def health():
         return JSONResponse(status_code=503, content={"status": "unhealthy", "error": str(e)})
 
 
-# Mount MCP server using FastMCP's built-in streamable HTTP transport
-# This is the correct approach for mcp==1.3.0
-# Databricks supervisor agent registers: <service_url>/mcp
-app.mount("/mcp", mcp.streamable_http_app())
+# MCP endpoint — Streamable HTTP transport
+# Databricks supervisor agent registers this URL
+@app.post("/mcp")
+@app.get("/mcp")
+async def mcp_endpoint(request: Request) -> Response:
+    transport = StreamableHTTPServerTransport(mcp_session_id=None)
+    async with transport.connect():
+        await mcp.run(transport)
+    return transport.response
