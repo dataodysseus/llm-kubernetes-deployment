@@ -38,6 +38,19 @@ on:
         options:
           - us-central1
           - us-east1
+          - us-east4
+          - us-west1
+          - europe-west1
+          - asia-east1
+      artifact_registry_region:
+        description: "Artifact Registry region (may differ from Cloud Run region)"
+        required: true
+        default: "us-east4"
+        type: choice
+        options:
+          - us-central1
+          - us-east1
+          - us-east4
           - us-west1
           - europe-west1
           - asia-east1
@@ -93,18 +106,19 @@ jobs:
 
       - name: Configure Docker Authentication
         run: |
-          gcloud auth configure-docker ${{ inputs.region }}-docker.pkg.dev
+          export ARTIFACT_REGISTRY_REGION=${{ inputs.artifact_registry_region }}
+          gcloud auth configure-docker $ARTIFACT_REGISTRY_REGION-docker.pkg.dev
           echo "Docker auth configured"
 
       - name: Build and Push Docker Image
         run: |
-          PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
-          REGISTRY=${{ secrets.GCP_ARTIFACT_REGISTRY }}
-          REGION=${{ inputs.region }}
-          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
-          IMAGE_BASE=$REGION-docker.pkg.dev/$PROJECT_ID/$REGISTRY/retail-mcp-server
+          export PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
+          export ARTIFACT_REGISTRY=${{ secrets.GCP_ARTIFACT_REGISTRY }}
+          export ARTIFACT_REGISTRY_REGION=${{ inputs.artifact_registry_region }}
+          export TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          export IMAGE_BASE=$ARTIFACT_REGISTRY_REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY/retail-mcp-server
 
-          echo "Building image..."
+          echo "Building image from mcp-server/..."
           docker build \
             -t $IMAGE_BASE:latest \
             -t $IMAGE_BASE:$TIMESTAMP \
