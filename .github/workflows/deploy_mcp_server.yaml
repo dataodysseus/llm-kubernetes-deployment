@@ -1,0 +1,187 @@
+name: "Deploy Retail MCP Server to Cloud Run"
+
+# ============================================================
+# Purpose   : Builds and deploys the retail PostgreSQL MCP
+#             server to Cloud Run. Exposes 6 read-only tools
+#             over sales + pgvector tables via Streamable HTTP.
+#
+# After deployment:
+#   Register the /mcp endpoint URL in your Databricks
+#   supervisor agent as an external MCP server.
+#
+# Reuses     : Same OIDC auth as all previous workflows.
+#
+# New secrets required:
+#   - PG_HOST        your static IP (34.9.255.250)
+#   - PG_PASSWORD    POSTGRES_PASSWORD value
+#
+# Existing secrets reused:
+#   - GCP_PROJECT_ID
+#   - GCP_WORKLOAD_IDENTITY_PROVIDER
+#   - GCP_SERVICE_ACCOUNT
+#   - GCP_ARTIFACT_REGISTRY
+# ============================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      service_name:
+        description: "Cloud Run service name"
+        required: true
+        default: "retail-mcp-server"
+        type: string
+      region:
+        description: "Cloud Run region"
+        required: true
+        default: "us-central1"
+        type: choice
+        options:
+          - us-central1
+          - us-east1
+          - us-west1
+          - europe-west1
+          - asia-east1
+      pg_db:
+        description: "PostgreSQL database name"
+        required: true
+        default: "appdb"
+        type: string
+      pg_user:
+        description: "PostgreSQL user"
+        required: true
+        default: "appuser"
+        type: string
+      min_instances:
+        description: "Minimum instances (0 = scale to zero)"
+        required: true
+        default: "0"
+        type: choice
+        options:
+          - "0"
+          - "1"
+
+jobs:
+  deploy:
+    name: "Deploy MCP Server → Cloud Run"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Authenticate with Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+          workload_identity_provider: "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}"
+          service_account: "${{ secrets.GCP_SERVICE_ACCOUNT }}"
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+
+      - name: Enable Required Services
+        run: |
+          gcloud services enable run.googleapis.com
+          gcloud services enable artifactregistry.googleapis.com
+          gcloud services enable cloudbuild.googleapis.com
+          echo "Services enabled"
+
+      - name: Configure Docker Authentication
+        run: |
+          gcloud auth configure-docker ${{ inputs.region }}-docker.pkg.dev
+          echo "Docker auth configured"
+
+      - name: Build and Push Docker Image
+        run: |
+          PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
+          REGISTRY=${{ secrets.GCP_ARTIFACT_REGISTRY }}
+          REGION=${{ inputs.region }}
+          TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          IMAGE_BASE=$REGION-docker.pkg.dev/$PROJECT_ID/$REGISTRY/retail-mcp-server
+
+          echo "Building image..."
+          docker build \
+            -t $IMAGE_BASE:latest \
+            -t $IMAGE_BASE:$TIMESTAMP \
+            mcp-server/
+
+          echo "Pushing image..."
+          docker push $IMAGE_BASE:latest
+          docker push $IMAGE_BASE:$TIMESTAMP
+
+          echo "IMAGE_URI=$IMAGE_BASE:latest" >> $GITHUB_ENV
+          echo "Image pushed: $IMAGE_BASE:latest"
+
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy ${{ inputs.service_name }} \
+            --image $IMAGE_URI \
+            --region ${{ inputs.region }} \
+            --platform managed \
+            --set-env-vars "PG_HOST=${{ secrets.PG_HOST }},PG_PASSWORD=${{ secrets.PG_PASSWORD }},PG_DB=${{ inputs.pg_db }},PG_USER=${{ inputs.pg_user }}" \
+            --allow-unauthenticated \
+            --min-instances ${{ inputs.min_instances }} \
+            --max-instances 10 \
+            --memory 512Mi \
+            --cpu 1 \
+            --timeout 60 \
+            --concurrency 80 \
+            --port 8080 \
+            --quiet
+
+          echo "Cloud Run deployment complete"
+
+      - name: Verify Health Check
+        run: |
+          SERVICE_URL=$(gcloud run services describe ${{ inputs.service_name }} \
+            --region ${{ inputs.region }} \
+            --format 'value(status.url)')
+
+          echo "Waiting 10s for service to warm up..."
+          sleep 10
+
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" $SERVICE_URL/health)
+          if [[ "$HTTP_CODE" == "200" ]]; then
+            echo "Health check passed (HTTP $HTTP_CODE)"
+            HEALTH=$(curl -s $SERVICE_URL/health)
+            echo "Response: $HEALTH"
+          else
+            echo "Health check returned HTTP $HTTP_CODE"
+            exit 1
+          fi
+
+          echo "SERVICE_URL=$SERVICE_URL" >> $GITHUB_ENV
+
+      - name: Print Registration Summary
+        run: |
+          echo ""
+          echo "=============================================="
+          echo "MCP SERVER DEPLOYED SUCCESSFULLY"
+          echo "=============================================="
+          echo ""
+          echo "Service URL  : $SERVICE_URL"
+          echo "MCP endpoint : $SERVICE_URL/mcp"
+          echo "Health check : $SERVICE_URL/health"
+          echo "API docs     : $SERVICE_URL/docs"
+          echo ""
+          echo "Register in Databricks supervisor agent:"
+          echo "  URL    : $SERVICE_URL/mcp"
+          echo "  Type   : streamable_http"
+          echo ""
+          echo "Tools available:"
+          echo "  - search_similar_products"
+          echo "  - get_inventory_status"
+          echo "  - get_low_stock_alerts"
+          echo "  - get_supplier_risk"
+          echo "  - get_active_promotions"
+          echo "  - get_promotion_stock_risk"
+          echo ""
+          echo "Min instances : ${{ inputs.min_instances }}"
+          echo "Memory        : 512Mi"
+          echo "Cost estimate : ~\$0/mo (scale to zero)"
+          echo "=============================================="
