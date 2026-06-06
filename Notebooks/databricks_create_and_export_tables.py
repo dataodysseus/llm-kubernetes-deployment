@@ -59,14 +59,14 @@ EXISTING_TABLE     = "catalog.schema.item_details"
 # COMMAND ----------
 
 # MAGIC %sql
-# MAGIC SELECT * FROM accenture.sales_analysis.item_details LIMIT 5;
+# MAGIC SELECT * FROM catalog.sales_analysis.item_details LIMIT 5;
 
 # COMMAND ----------
 
 import random
 from pyspark.sql import SparkSession
 
-item_df = spark.table("accenture.sales_analysis.item_details")
+item_df = spark.table("catalog.sales_analysis.item_details")
 
 # Combine name + description as the text to embed
 # This gives richer semantic signal than description alone
