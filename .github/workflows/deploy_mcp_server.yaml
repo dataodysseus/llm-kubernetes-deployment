@@ -137,7 +137,7 @@ jobs:
             --image $IMAGE_URI \
             --region ${{ inputs.region }} \
             --platform managed \
-            --set-env-vars "PG_HOST=${{ secrets.PG_HOST }},PG_PASSWORD=${{ secrets.PG_PASSWORD }},PG_DB=${{ inputs.pg_db }},PG_USER=${{ inputs.pg_user }}" \
+            --set-env-vars "PG_HOST=${{ secrets.PG_HOST }},PG_PASSWORD=${{ secrets.PG_PASSWORD }},PG_DB=${{ inputs.pg_db }},PG_USER=${{ inputs.pg_user }},MCP_BEARER_TOKEN=${{ secrets.MCP_BEARER_TOKEN }}" \
             --allow-unauthenticated \
             --min-instances ${{ inputs.min_instances }} \
             --max-instances 10 \
