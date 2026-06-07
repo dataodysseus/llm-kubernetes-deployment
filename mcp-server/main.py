@@ -201,7 +201,51 @@ async def root():
     }
 
 
-# Mount MCP with Bearer token middleware
+# ── Direct REST tool endpoints ────────────────────────────
+# Exposes each MCP tool as a plain POST /tools/<name> endpoint.
+# This is what the chat UI backend calls — no MCP protocol needed.
+
+TOOL_REGISTRY = {
+    "search_similar_products":  search_similar_products,
+    "get_inventory_status":     get_inventory_status,
+    "get_low_stock_alerts":     get_low_stock_alerts,
+    "get_supplier_risk":        get_supplier_risk,
+    "get_active_promotions":    get_active_promotions,
+    "get_promotion_stock_risk": get_promotion_stock_risk,
+}
+
+
+@app.post("/tools/{tool_name}")
+async def call_tool(tool_name: str, request: Request):
+    """Call any registered tool by name. Accepts JSON body as tool arguments."""
+    if MCP_BEARER_TOKEN:
+        auth = request.headers.get("Authorization", "")
+        if not auth.startswith("Bearer ") or auth[7:] != MCP_BEARER_TOKEN:
+            return JSONResponse(status_code=401, content={"detail": "Unauthorized"})
+
+    if tool_name not in TOOL_REGISTRY:
+        return JSONResponse(status_code=404, content={"detail": f"Tool '{tool_name}' not found. Available: {list(TOOL_REGISTRY.keys())}"})
+
+    try:
+        body = await request.json() if request.headers.get("content-length", "0") != "0" else {}
+    except Exception:
+        body = {}
+
+    try:
+        result = TOOL_REGISTRY[tool_name](**body)
+        return {"tool": tool_name, "result": result}
+    except Exception as e:
+        logger.error(f"Tool {tool_name} error: {e}")
+        return JSONResponse(status_code=500, content={"detail": str(e)})
+
+
+@app.get("/tools")
+async def list_tools():
+    """List all available tools."""
+    return {"tools": list(TOOL_REGISTRY.keys())}
+
+
+# Mount MCP server (streamable HTTP protocol for MCP-native clients)
 mcp_app = mcp.streamable_http_app()
 
 

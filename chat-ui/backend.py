@@ -70,67 +70,118 @@ quantities, and supplier names from the results. If a question spans multiple to
 Format numbers clearly and highlight urgent situations (OUT_OF_STOCK, high lead times) prominently."""
 
 
-async def get_mcp_tools() -> list[dict]:
-    """Fetch available tools from the MCP server."""
-    headers = {"Content-Type": "application/json"}
-    if MCP_BEARER_TOKEN:
-        headers["Authorization"] = f"Bearer {MCP_BEARER_TOKEN}"
-
-    async with httpx.AsyncClient(timeout=30, follow_redirects=True) as http:
-        resp = await http.post(
-            f"{MCP_SERVER_URL}/mcp/",
-            headers=headers,
-            json={"jsonrpc": "2.0", "id": 1, "method": "tools/list", "params": {}},
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        tools = data.get("result", {}).get("tools", [])
-
-    # Convert MCP tool schema to Anthropic tool format
-    anthropic_tools = []
-    for t in tools:
-        anthropic_tools.append({
-            "name": t["name"],
-            "description": t.get("description", ""),
-            "input_schema": t.get("inputSchema", {"type": "object", "properties": {}}),
-        })
-    return anthropic_tools
+def get_mcp_tools() -> list[dict]:
+    """Return the retail MCP tool definitions for Claude.
+    Hardcoded to match the tools defined in the MCP server — avoids
+    a JSON-RPC tools/list round-trip which varies by MCP library version.
+    """
+    return [
+        {
+            "name": "search_similar_products",
+            "description": "Search for retail products semantically similar to a query. Uses pgvector cosine similarity on 1024d embeddings. Returns top-k results with similarity scores.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "query_embedding": {"type": "array", "items": {"type": "number"}, "description": "1024-dimensional float list from BGE-large-en"},
+                    "top_k": {"type": "integer", "default": 5, "description": "Number of results (max 20)"},
+                    "source_filter": {"type": "string", "default": "databricks_item_table"},
+                },
+                "required": ["query_embedding"],
+            },
+        },
+        {
+            "name": "get_inventory_status",
+            "description": "Get current inventory levels across warehouses. Filter by item_id, warehouse_region, or status (IN_STOCK, LOW_STOCK, OUT_OF_STOCK).",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "item_id": {"type": "string", "description": "Product ID e.g. p-1"},
+                    "warehouse_region": {"type": "string", "description": "e.g. Northeast USA"},
+                    "status": {"type": "string", "enum": ["IN_STOCK", "LOW_STOCK", "OUT_OF_STOCK"]},
+                    "limit": {"type": "integer", "default": 50},
+                },
+            },
+        },
+        {
+            "name": "get_low_stock_alerts",
+            "description": "Get all LOW_STOCK or OUT_OF_STOCK products. Optionally filter by warehouse_region. Critical for reorder decisions.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "warehouse_region": {"type": "string", "description": "e.g. West Coast USA"},
+                },
+            },
+        },
+        {
+            "name": "get_supplier_risk",
+            "description": "Identify supply chain risk — critical raw materials from single suppliers and which finished products are affected.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "supplier_id": {"type": "string", "description": "e.g. SUP-009"},
+                    "critical_only": {"type": "boolean", "default": True},
+                    "min_products_affected": {"type": "integer", "default": 1},
+                },
+            },
+        },
+        {
+            "name": "get_active_promotions",
+            "description": "Get currently active promotions with discount values, applicable products, regional restrictions, and usage stats.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "region": {"type": "string", "description": "e.g. Northeast USA"},
+                    "include_upcoming": {"type": "boolean", "default": False},
+                },
+            },
+        },
+        {
+            "name": "get_promotion_stock_risk",
+            "description": "Find products on active promotions that are LOW_STOCK or OUT_OF_STOCK — critical business risk where demand is driven for unfulfillable products.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "warehouse_region": {"type": "string"},
+                },
+            },
+        },
+    ]
 
 
 async def call_mcp_tool(tool_name: str, tool_input: dict) -> str:
-    """Call a specific tool on the MCP server."""
+    """Call a tool directly via the /tools/<name> REST endpoint on the MCP server.
+    This bypasses JSON-RPC and calls the tools as plain HTTP POST endpoints,
+    which is what FastMCP's streamable_http_app exposes.
+    """
     headers = {"Content-Type": "application/json"}
     if MCP_BEARER_TOKEN:
         headers["Authorization"] = f"Bearer {MCP_BEARER_TOKEN}"
 
     async with httpx.AsyncClient(timeout=60, follow_redirects=True) as http:
         resp = await http.post(
-            f"{MCP_SERVER_URL}/mcp/",
+            f"{MCP_SERVER_URL}/tools/{tool_name}",
             headers=headers,
-            json={
-                "jsonrpc": "2.0",
-                "id": 2,
-                "method": "tools/call",
-                "params": {"name": tool_name, "arguments": tool_input},
-            },
+            json=tool_input,
         )
         resp.raise_for_status()
         data = resp.json()
 
-    result = data.get("result", {})
-    content = result.get("content", [])
-    if content and isinstance(content, list):
-        return content[0].get("text", json.dumps(result))
-    return json.dumps(result)
+    # FastMCP returns {"result": ...} or the data directly
+    if isinstance(data, list):
+        return json.dumps(data)
+    if isinstance(data, dict):
+        result = data.get("result", data)
+        return json.dumps(result)
+    return json.dumps(data)
 
 
 @app.post("/chat", response_model=ChatResponse)
 async def chat(req: ChatRequest):
     try:
-        tools = await get_mcp_tools()
+        tools = get_mcp_tools()
     except Exception as e:
-        logger.error(f"Failed to fetch MCP tools: {e}")
-        tools = []
+        logger.error(f"Failed to get tools: {e}")
+        tools = get_mcp_tools()
 
     messages = req.history + [{"role": "user", "content": req.message}]
     tool_calls_log = []
@@ -138,7 +189,7 @@ async def chat(req: ChatRequest):
     # Agentic loop — Claude calls tools until it has enough info
     for _ in range(10):
         response = client.messages.create(
-            model="claude-sonnet-4-20250514",
+            model="claude-sonnet-4-5",
             max_tokens=4096,
             system=SYSTEM_PROMPT,
             tools=tools if tools else [],
