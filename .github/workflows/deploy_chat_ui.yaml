@@ -1,0 +1,246 @@
+name: "Deploy MCP Chat UI to Cloud Run"
+
+# ============================================================
+# Purpose   : Builds and deploys the MCP-native chat backend
+#             to Cloud Run. Serves both the chat UI (index.html)
+#             and the FastAPI backend from a single container.
+#
+#             Uses true MCP Streamable HTTP protocol to communicate
+#             with the retail MCP server (Workflow 6).
+#
+# Pre-req   : Workflow 6 (MCP server) must be deployed first.
+#             The MCP server URL is passed as an env var.
+#
+# Secrets required (all existing except ANTHROPIC_API_KEY):
+#   - GCP_PROJECT_ID               (existing)
+#   - GCP_WORKLOAD_IDENTITY_PROVIDER (existing)
+#   - GCP_SERVICE_ACCOUNT          (existing)
+#   - GCP_ARTIFACT_REGISTRY        (existing)
+#   - MCP_BEARER_TOKEN             (existing, from Workflow 6)
+#   - ANTHROPIC_API_KEY            (new — from console.anthropic.com)
+#
+# Architecture after deployment:
+#   Browser
+#     ↓ HTTPS
+#   Chat Backend (this service, Cloud Run)
+#     ↓ MCP Streamable HTTP (tools/list + tools/call)
+#   MCP Server (Workflow 6, Cloud Run)
+#     ↓ psycopg2
+#   PostgreSQL on GCP VM
+# ============================================================
+
+on:
+  workflow_dispatch:
+    inputs:
+      service_name:
+        description: "Cloud Run service name for the chat UI"
+        required: true
+        default: "retail-chat-ui"
+        type: string
+      region:
+        description: "Cloud Run region"
+        required: true
+        default: "us-central1"
+        type: choice
+        options:
+          - us-central1
+          - us-east1
+          - us-east4
+          - us-west1
+          - europe-west1
+          - asia-east1
+      artifact_registry_region:
+        description: "Artifact Registry region (matches your existing registry)"
+        required: true
+        default: "us-east4"
+        type: choice
+        options:
+          - us-central1
+          - us-east1
+          - us-east4
+          - us-west1
+          - europe-west1
+          - asia-east1
+      mcp_server_url:
+        description: "Your MCP server Cloud Run URL (from Workflow 6 output)"
+        required: true
+        default: "https://retail-mcp-server-630538663455.us-central1.run.app"
+        type: string
+      min_instances:
+        description: "Minimum instances (0 = scale to zero, free when idle)"
+        required: true
+        default: "0"
+        type: choice
+        options:
+          - "0"
+          - "1"
+
+jobs:
+  deploy-chat-ui:
+    name: "Deploy Chat UI → Cloud Run (${{ inputs.region }})"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Authenticate with Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+          workload_identity_provider: "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}"
+          service_account: "${{ secrets.GCP_SERVICE_ACCOUNT }}"
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v1
+        with:
+          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+
+      # --------------------------------------------------------
+      # Enable required GCP services
+      # --------------------------------------------------------
+      - name: Enable Required GCP Services
+        run: |
+          gcloud services enable run.googleapis.com
+          gcloud services enable artifactregistry.googleapis.com
+          gcloud services enable cloudbuild.googleapis.com
+          echo "Services enabled"
+
+      # --------------------------------------------------------
+      # Docker auth — uses artifact_registry_region input
+      # consistent with Workflow 6 pattern
+      # --------------------------------------------------------
+      - name: Configure Docker Authentication
+        run: |
+          export ARTIFACT_REGISTRY_REGION=${{ inputs.artifact_registry_region }}
+          gcloud auth configure-docker $ARTIFACT_REGISTRY_REGION-docker.pkg.dev
+          echo "Docker auth configured for $ARTIFACT_REGISTRY_REGION"
+
+      # --------------------------------------------------------
+      # Build image from chat-backend/ directory
+      # Includes backend.py + requirements.txt + static/index.html
+      # --------------------------------------------------------
+      - name: Build and Push Docker Image
+        run: |
+          export PROJECT_ID=${{ secrets.GCP_PROJECT_ID }}
+          export ARTIFACT_REGISTRY=${{ secrets.GCP_ARTIFACT_REGISTRY }}
+          export ARTIFACT_REGISTRY_REGION=${{ inputs.artifact_registry_region }}
+          export TIMESTAMP=$(date +%Y%m%d-%H%M%S)
+          export IMAGE_BASE=$ARTIFACT_REGISTRY_REGION-docker.pkg.dev/$PROJECT_ID/$ARTIFACT_REGISTRY/retail-chat-ui
+
+          echo "Building chat UI image from chat-backend/..."
+          echo "Image: $IMAGE_BASE:latest"
+
+          docker build \
+            -t $IMAGE_BASE:latest \
+            -t $IMAGE_BASE:$TIMESTAMP \
+            chat-backend/
+
+          echo "Pushing images..."
+          docker push $IMAGE_BASE:latest
+          docker push $IMAGE_BASE:$TIMESTAMP
+
+          echo "IMAGE_URI=$IMAGE_BASE:latest" >> $GITHUB_ENV
+          echo "Image pushed successfully"
+
+      # --------------------------------------------------------
+      # Deploy to Cloud Run
+      # Key env vars:
+      #   ANTHROPIC_API_KEY  — Claude API access
+      #   MCP_SERVER_URL     — points to Workflow 6 service
+      #   MCP_BEARER_TOKEN   — authenticates with MCP server
+      # --------------------------------------------------------
+      - name: Deploy to Cloud Run
+        run: |
+          gcloud run deploy ${{ inputs.service_name }} \
+            --image $IMAGE_URI \
+            --region ${{ inputs.region }} \
+            --platform managed \
+            --set-env-vars "ANTHROPIC_API_KEY=${{ secrets.ANTHROPIC_API_KEY }},MCP_SERVER_URL=${{ inputs.mcp_server_url }},MCP_BEARER_TOKEN=${{ secrets.MCP_BEARER_TOKEN }}" \
+            --allow-unauthenticated \
+            --min-instances ${{ inputs.min_instances }} \
+            --max-instances 5 \
+            --memory 512Mi \
+            --cpu 1 \
+            --timeout 120 \
+            --concurrency 10 \
+            --port 8080 \
+            --quiet
+
+          echo "Cloud Run deployment complete"
+
+      # --------------------------------------------------------
+      # Health check — verifies both the chat backend AND
+      # the MCP server connection in one call
+      # --------------------------------------------------------
+      - name: Verify Health Check
+        run: |
+          SERVICE_URL=$(gcloud run services describe ${{ inputs.service_name }} \
+            --region ${{ inputs.region }} \
+            --format 'value(status.url)')
+
+          echo "Waiting 15s for service to warm up and connect to MCP server..."
+          sleep 15
+
+          HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" $SERVICE_URL/health)
+
+          if [[ "$HTTP_CODE" == "200" ]]; then
+            echo "Health check passed (HTTP $HTTP_CODE)"
+            HEALTH=$(curl -s $SERVICE_URL/health)
+            echo "Health response: $HEALTH"
+
+            # Check MCP connection status in health response
+            if echo "$HEALTH" | grep -q '"protocol"'; then
+              echo "MCP protocol connection: VERIFIED"
+            else
+              echo "Warning: MCP connection may be degraded — check logs"
+            fi
+          else
+            echo "Health check returned HTTP $HTTP_CODE"
+            echo "Check Cloud Run logs for startup errors"
+            exit 1
+          fi
+
+          echo "SERVICE_URL=$SERVICE_URL" >> $GITHUB_ENV
+
+      # --------------------------------------------------------
+      # Final summary
+      # --------------------------------------------------------
+      - name: Print Deployment Summary
+        run: |
+          SERVICE_URL=$(gcloud run services describe ${{ inputs.service_name }} \
+            --region ${{ inputs.region }} \
+            --format 'value(status.url)')
+
+          echo ""
+          echo "=============================================="
+          echo "RETAIL CHAT UI DEPLOYED SUCCESSFULLY"
+          echo "=============================================="
+          echo ""
+          echo "Chat UI URL   : $SERVICE_URL"
+          echo "Health check  : $SERVICE_URL/health"
+          echo "API docs      : $SERVICE_URL/docs"
+          echo ""
+          echo "MCP Server    : ${{ inputs.mcp_server_url }}/mcp"
+          echo "Protocol      : MCP Streamable HTTP"
+          echo "Transport     : tools/list + tools/call"
+          echo ""
+          echo "Open in your browser:"
+          echo "  $SERVICE_URL"
+          echo ""
+          echo "Architecture:"
+          echo "  Browser"
+          echo "    -> $SERVICE_URL (Chat UI + Backend)"
+          echo "    -> ${{ inputs.mcp_server_url }}/mcp (MCP Server)"
+          echo "    -> PostgreSQL @ 34.9.255.250:5432"
+          echo ""
+          echo "New secret needed in GitHub:"
+          echo "  ANTHROPIC_API_KEY = your key from console.anthropic.com"
+          echo ""
+          echo "Min instances : ${{ inputs.min_instances }}"
+          echo "Concurrency   : 10 (MCP sessions are stateful per request)"
+          echo "Timeout       : 120s (allows for multi-tool reasoning chains)"
+          echo "=============================================="
