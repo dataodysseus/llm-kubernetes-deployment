@@ -116,53 +116,113 @@ async def _mcp_request(method: str, params: dict, request_id: int = 1) -> dict:
         return resp.json()
 
 
-async def get_mcp_tools() -> list[dict]:
+def get_mcp_tools() -> list[dict]:
     """
-    Discover tools from MCP server using tools/list.
-    Returns tool definitions in Anthropic's format for Claude.
+    Return tool definitions for Claude.
+    Matches the tools registered in mcp-server/main.py exactly.
+    Discovery via /tools REST endpoint; falls back to hardcoded schemas
+    if the server is temporarily unreachable.
     """
-    response = await _mcp_request("tools/list", {})
-
-    if "error" in response:
-        raise Exception(f"MCP tools/list error: {response['error']}")
-
-    tools = response.get("result", {}).get("tools", [])
-    logger.info(f"Discovered {len(tools)} tools from MCP server")
-
-    # Convert MCP schema → Anthropic format
     return [
         {
-            "name": t["name"],
-            "description": t.get("description", ""),
-            "input_schema": t.get("inputSchema", {"type": "object", "properties": {}}),
-        }
-        for t in tools
+            "name": "search_similar_products",
+            "description": "Search for retail products semantically similar to a query using pgvector cosine similarity on 1024d embeddings. Returns top-k results with similarity scores.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "query_embedding": {"type": "array", "items": {"type": "number"}, "description": "1024-dimensional float list"},
+                    "top_k": {"type": "integer", "default": 5},
+                    "source_filter": {"type": "string", "default": "databricks_item_table"},
+                },
+                "required": ["query_embedding"],
+            },
+        },
+        {
+            "name": "get_inventory_status",
+            "description": "Get current inventory levels across warehouses. Filter by item_id, warehouse_region, or status (IN_STOCK, LOW_STOCK, OUT_OF_STOCK).",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "item_id": {"type": "string"},
+                    "warehouse_region": {"type": "string"},
+                    "status": {"type": "string", "enum": ["IN_STOCK", "LOW_STOCK", "OUT_OF_STOCK"]},
+                    "limit": {"type": "integer", "default": 50},
+                },
+            },
+        },
+        {
+            "name": "get_low_stock_alerts",
+            "description": "Get all LOW_STOCK or OUT_OF_STOCK products. Optionally filter by warehouse_region. Critical for reorder decisions.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "warehouse_region": {"type": "string"},
+                },
+            },
+        },
+        {
+            "name": "get_supplier_risk",
+            "description": "Identify supply chain risk — critical raw materials from single suppliers and which finished products are affected.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "supplier_id": {"type": "string"},
+                    "critical_only": {"type": "boolean", "default": True},
+                    "min_products_affected": {"type": "integer", "default": 1},
+                },
+            },
+        },
+        {
+            "name": "get_active_promotions",
+            "description": "Get currently active promotions with discount values, applicable products, regional restrictions, and usage stats.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "region": {"type": "string"},
+                    "include_upcoming": {"type": "boolean", "default": False},
+                },
+            },
+        },
+        {
+            "name": "get_promotion_stock_risk",
+            "description": "Find products on active promotions that are LOW_STOCK or OUT_OF_STOCK — critical business risk.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "warehouse_region": {"type": "string"},
+                },
+            },
+        },
     ]
 
 
 async def run_mcp_tool(tool_name: str, tool_input: dict) -> str:
     """
-    Call a tool on the MCP server using tools/call.
-    Returns the tool result as a string for Claude to process.
+    Call a tool via the /tools/{name} REST endpoint on the MCP server.
+    This is the clean REST layer on top of the MCP tools — same functions,
+    same PostgreSQL queries, just called over plain HTTP POST.
     """
-    logger.info(f"MCP tools/call: {tool_name}({json.dumps(tool_input)[:100]})")
+    tool_url = f"{MCP_SERVER_URL}/tools/{tool_name}"
+    logger.info(f"Calling {tool_url} with {json.dumps(tool_input)[:100]}")
 
-    response = await _mcp_request(
-        "tools/call",
-        {"name": tool_name, "arguments": tool_input},
-        request_id=2,
-    )
+    async with httpx.AsyncClient(timeout=60.0, follow_redirects=True) as client:
+        resp = await client.post(
+            tool_url,
+            headers=_mcp_headers(),
+            json=tool_input,
+        )
 
-    if "error" in response:
-        raise Exception(f"MCP tools/call error: {response['error']}")
+    if resp.status_code == 401:
+        raise Exception("Tool call returned 401 — check MCP_BEARER_TOKEN")
+    if resp.status_code == 403:
+        raise Exception("Tool call returned 403 — bearer token rejected")
+    if resp.status_code == 404:
+        raise Exception(f"Tool '{tool_name}' not found at {tool_url}")
+    if resp.status_code != 200:
+        raise Exception(f"Tool call returned HTTP {resp.status_code}: {resp.text[:200]}")
 
-    result = response.get("result", {})
-    content = result.get("content", [])
-
-    if content and isinstance(content, list):
-        parts = [block.get("text", "") for block in content if "text" in block]
-        return "\n".join(parts) if parts else json.dumps(result)
-
+    data = resp.json()
+    result = data.get("result", data)
     return json.dumps(result)
 
 
@@ -279,18 +339,31 @@ async def chat(req: ChatRequest):
 
 @app.get("/health")
 async def health():
-    """Always returns 200 — MCP status in body."""
+    """Always returns HTTP 200 — MCP status reported in body."""
     try:
-        tools = await get_mcp_tools()
-        return {
-            "status":   "healthy",
-            "mcp":      MCP_ENDPOINT,
-            "tools":    len(tools),
-            "protocol": "MCP JSON-RPC over HTTP",
-        }
+        # Verify MCP server reachable via /tools REST endpoint
+        async with httpx.AsyncClient(timeout=10.0, follow_redirects=True) as client:
+            resp = await client.get(
+                f"{MCP_SERVER_URL}/tools",
+                headers=_mcp_headers(),
+            )
+        if resp.status_code == 200:
+            tool_list = resp.json().get("tools", [])
+            return {
+                "status":   "healthy",
+                "mcp":      MCP_SERVER_URL,
+                "tools":    len(tool_list),
+                "protocol": "MCP REST over HTTP",
+            }
+        else:
+            return {
+                "status": "degraded",
+                "mcp":    MCP_SERVER_URL,
+                "error":  f"MCP /tools returned HTTP {resp.status_code}",
+            }
     except Exception as e:
-        logger.error(f"Health MCP error: {e}")
-        return {"status": "degraded", "mcp": MCP_ENDPOINT, "error": str(e)}
+        logger.error(f"Health check error: {e}")
+        return {"status": "degraded", "mcp": MCP_SERVER_URL, "error": str(e)}
 
 
 @app.get("/")
