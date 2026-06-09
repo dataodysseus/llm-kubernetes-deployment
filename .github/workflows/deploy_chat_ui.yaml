@@ -1,4 +1,4 @@
-name: "7 - Deploy MCP Chat UI to Cloud Run"
+name: "Deploy MCP Chat UI to Cloud Run"
 
 # ============================================================
 # Purpose   : Builds and deploys the MCP-native chat backend
