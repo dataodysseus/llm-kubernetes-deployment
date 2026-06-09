@@ -176,6 +176,22 @@ jobs:
       # Health check — verifies both the chat backend AND
       # the MCP server connection in one call
       # --------------------------------------------------------
+      # --------------------------------------------------------
+      # Fetch startup logs before health check
+      # This captures the actual crash reason if container fails to start
+      # --------------------------------------------------------
+      - name: Fetch Container Startup Logs
+        run: |
+          SERVICE_URL=$(gcloud run services describe ${{ inputs.service_name }}             --region ${{ inputs.region }}             --format 'value(status.url)')
+
+          echo "Waiting 20s for container to attempt startup..."
+          sleep 20
+
+          echo ""
+          echo "=== CLOUD RUN STARTUP LOGS ==="
+          gcloud logging read             "resource.type=cloud_run_revision AND resource.labels.service_name=${{ inputs.service_name }}"             --limit=30             --format="value(timestamp,textPayload,jsonPayload.message)"             --project=${{ secrets.GCP_PROJECT_ID }}             --freshness=5m             2>/dev/null || echo "Could not fetch logs (permission or timing issue)"
+          echo "=== END LOGS ==="
+
       - name: Verify Health Check
         run: |
           SERVICE_URL=$(gcloud run services describe ${{ inputs.service_name }} \
