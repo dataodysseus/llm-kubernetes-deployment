@@ -166,8 +166,7 @@ jobs:
             --memory 512Mi \
             --cpu 1 \
             --timeout 120 \
-            --concurrency 80 \
-            --use-http2 \
+            --concurrency 10 \
             --port 8080 \
             --quiet
 
