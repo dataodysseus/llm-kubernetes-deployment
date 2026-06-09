@@ -150,17 +150,20 @@ async def get_mcp_tools() -> list[dict]:
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """
-    On startup: verify MCP server is reachable and discover tools.
-    This gives a clear error at boot time rather than on first request.
+    Startup: log config and attempt MCP connection check.
+    Never raises — Cloud Run needs the container to start cleanly
+    even if the MCP server is temporarily unreachable.
     """
-    logger.info(f"Connecting to MCP server: {MCP_ENDPOINT}")
+    logger.info("=== Retail Chat UI starting up ===")
+    logger.info(f"MCP endpoint : {MCP_ENDPOINT}")
+    logger.info(f"Anthropic key: {'set' if ANTHROPIC_API_KEY else 'MISSING'}")
+    logger.info(f"Bearer token : {'set' if MCP_BEARER_TOKEN else 'not set'}")
     try:
         tools = await get_mcp_tools()
-        tool_names = [t["name"] for t in tools]
-        logger.info(f"MCP tools available: {tool_names}")
+        logger.info(f"MCP connected — {len(tools)} tools: {[t['name'] for t in tools]}")
     except Exception as e:
-        logger.warning(f"MCP server not reachable at startup: {e}")
-        logger.warning("Will retry on first request")
+        # Log but never crash — tool calls will surface errors per-request
+        logger.warning(f"MCP server not reachable at startup (will retry per request): {e}")
     yield
     logger.info("Shutting down")
 
@@ -285,7 +288,9 @@ async def chat(req: ChatRequest):
 async def health():
     """
     Health check for Cloud Run.
-    Also verifies MCP server reachability and reports tool count.
+    ALWAYS returns HTTP 200 — Cloud Run kills the container if this
+    returns non-200 during the startup liveness probe window.
+    MCP connectivity is reported in the body but never affects status code.
     """
     try:
         tools = await get_mcp_tools()
@@ -296,12 +301,12 @@ async def health():
             "protocol":   "MCP Streamable HTTP",
         }
     except Exception as e:
-        # Return 200 even if MCP is temporarily unreachable
-        # so Cloud Run doesn't kill the container
+        logger.error(f"Health check MCP error: {e}")
         return {
             "status":     "degraded",
             "mcp_server": MCP_ENDPOINT,
             "error":      str(e),
+            "note":       "Chat will work once MCP server is reachable",
         }
 
 

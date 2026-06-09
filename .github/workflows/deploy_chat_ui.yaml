@@ -1,4 +1,4 @@
-name: "Deploy MCP Chat UI to Cloud Run"
+name: "7 - Deploy MCP Chat UI to Cloud Run"
 
 # ============================================================
 # Purpose   : Builds and deploys the MCP-native chat backend
@@ -192,15 +192,17 @@ jobs:
             HEALTH=$(curl -s $SERVICE_URL/health)
             echo "Health response: $HEALTH"
 
-            # Check MCP connection status in health response
             if echo "$HEALTH" | grep -q '"protocol"'; then
               echo "MCP protocol connection: VERIFIED"
+            elif echo "$HEALTH" | grep -q '"degraded"'; then
+              echo "Warning: MCP connection degraded at startup — will retry per request"
+              echo "Check that MCP_SERVER_URL and MCP_BEARER_TOKEN are correct"
             else
-              echo "Warning: MCP connection may be degraded — check logs"
+              echo "Service is up — MCP status unknown"
             fi
           else
-            echo "Health check returned HTTP $HTTP_CODE"
-            echo "Check Cloud Run logs for startup errors"
+            echo "Health check returned HTTP $HTTP_CODE — container failed to start"
+            echo "Check Cloud Run logs: gcloud logging read 'resource.type=cloud_run_revision AND resource.labels.service_name=${{ inputs.service_name }}' --limit=20 --project=${{ secrets.GCP_PROJECT_ID }}"
             exit 1
           fi
 
