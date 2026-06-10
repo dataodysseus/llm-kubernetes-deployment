@@ -366,10 +366,6 @@ async def health():
         return {"status": "degraded", "mcp": MCP_SERVER_URL, "error": str(e)}
 
 
-@app.get("/")
-async def root():
-    return {"service": "retail-chat-ui", "mcp": MCP_ENDPOINT}
-
-
-# Serve frontend
+# Serve frontend — StaticFiles handles GET / and serves index.html
+# No explicit root route needed — StaticFiles html=True does it automatically
 app.mount("/", StaticFiles(directory="static", html=True), name="static")
