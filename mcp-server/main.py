@@ -80,6 +80,7 @@ def verify_token(request: Request):
 # ── MCP server ─────────────────────────────────────────────
 mcp = FastMCP(
     name="retail-postgres-mcp",
+    stateless_http=True,  # Required for Claude Code + Claude Desktop compatibility
     instructions=(
         "You have access to a retail PostgreSQL database containing "
         "inventory, suppliers, Bill of Materials, promotions, and "
