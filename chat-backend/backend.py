@@ -234,7 +234,7 @@ async def lifespan(app: FastAPI):
     logger.info(f"Anthropic key: {'set' if ANTHROPIC_API_KEY else 'MISSING'}")
     logger.info(f"Bearer token : {'set' if MCP_BEARER_TOKEN else 'not set'}")
     try:
-        tools = await get_mcp_tools()
+        tools = get_mcp_tools()
         logger.info(f"MCP connected — tools: {[t['name'] for t in tools]}")
     except Exception as e:
         logger.warning(f"MCP not reachable at startup (will retry per request): {e}")
@@ -280,7 +280,7 @@ multiple tools, call them all. Highlight urgent situations prominently."""
 async def chat(req: ChatRequest):
     # Discover tools via MCP protocol
     try:
-        tools = await get_mcp_tools()
+        tools = get_mcp_tools()
     except Exception as e:
         logger.error(f"Cannot reach MCP server: {e}")
         return ChatResponse(
