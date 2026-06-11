@@ -247,6 +247,7 @@ app = FastAPI(
     description="MCP-native chat UI for retail PostgreSQL database",
     version="2.0.0",
     lifespan=lifespan,
+    redirect_slashes=False, 
 )
 
 app.add_middleware(
