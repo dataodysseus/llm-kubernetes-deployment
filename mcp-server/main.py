@@ -19,6 +19,7 @@ import psycopg2.pool
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from mcp.server.fastmcp import FastMCP
+from uvicorn.middleware.proxy_headers import ProxyHeadersMiddleware
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -261,3 +262,7 @@ async def bearer_token_middleware(request: Request, call_next):
 
 
 app.mount("/mcp", mcp_app)
+
+# Trust Cloud Run's X-Forwarded-Proto header so Starlette generates https:// redirect URLs.
+# Without this, the /mcp → /mcp/ trailing-slash redirect uses http:// and Claude Code can't follow it.
+app.add_middleware(ProxyHeadersMiddleware, trusted_hosts="*")
