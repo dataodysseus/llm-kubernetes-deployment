@@ -81,6 +81,7 @@ def verify_token(request: Request):
 mcp = FastMCP(
     name="retail-postgres-mcp",
     stateless_http=True,  # Required for Claude Code + Claude Desktop compatibility
+    streamable_http_path="/",  # Handler lives at root of the /mcp mount point
     instructions=(
         "You have access to a retail PostgreSQL database containing "
         "inventory, suppliers, Bill of Materials, promotions, and "
@@ -260,4 +261,4 @@ async def bearer_token_middleware(request: Request, call_next):
     return await call_next(request)
 
 
-app.mount("/", mcp_app)
+app.mount("/mcp", mcp_app)
