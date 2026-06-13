@@ -169,7 +169,8 @@ async def lifespan(app: FastAPI):
     logger.info("MCP server starting...")
     logger.info(f"PG_HOST={PG_HOST} PG_DB={PG_DB} PG_USER={PG_USER}")
     logger.info(f"Bearer token auth: {'enabled' if MCP_BEARER_TOKEN else 'disabled'}")
-    yield
+    async with mcp.session_manager.run():
+        yield
     global _pool
     if _pool:
         _pool.closeall()
@@ -180,6 +181,7 @@ app = FastAPI(
     description="MCP tools over sales + pgvector tables in appdb",
     version="1.0.0",
     lifespan=lifespan,
+    redirect_slashes=False,
 )
 
 
