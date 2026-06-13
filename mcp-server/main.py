@@ -19,6 +19,8 @@ import psycopg2.pool
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from mcp.server.fastmcp import FastMCP
+from mcp.server.transport_security import TransportSecuritySettings
+from starlette.routing import Route
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -82,6 +84,9 @@ mcp = FastMCP(
     name="retail-postgres-mcp",
     stateless_http=True,  # Required for Claude Code + Claude Desktop compatibility
     streamable_http_path="/",  # Handler lives at root of the /mcp mount point
+    # Disable DNS rebinding protection: Cloud Run is behind Google's load balancer
+    # so the Host header will never be 127.0.0.1. Auth is enforced via Bearer token.
+    transport_security=TransportSecuritySettings(enable_dns_rebinding_protection=False),
     instructions=(
         "You have access to a retail PostgreSQL database containing "
         "inventory, suppliers, Bill of Materials, promotions, and "
@@ -249,8 +254,11 @@ async def list_tools():
     return {"tools": list(TOOL_REGISTRY.keys())}
 
 
-# Mount MCP server (streamable HTTP protocol for MCP-native clients)
-mcp_app = mcp.streamable_http_app()
+# Register MCP server at /mcp — uses a direct Route (not mount) so both
+# /mcp and /mcp/ work without Starlette's mount trailing-slash requirement.
+_mcp_sub_app = mcp.streamable_http_app()
+_mcp_handler = _mcp_sub_app.routes[0].endpoint  # StreamableHTTPASGIApp instance
+app.router.routes.insert(0, Route("/mcp", endpoint=_mcp_handler))
 
 
 @app.middleware("http")
@@ -261,6 +269,3 @@ async def bearer_token_middleware(request: Request, call_next):
         if not auth.startswith("Bearer ") or auth[7:] != MCP_BEARER_TOKEN:
             return JSONResponse(status_code=401, content={"detail": "Invalid or missing Bearer token"})
     return await call_next(request)
-
-
-app.mount("/mcp", mcp_app)
