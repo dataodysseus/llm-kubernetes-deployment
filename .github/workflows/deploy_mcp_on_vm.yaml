@@ -1,35 +1,25 @@
-name: "Deploy MCP Server on GCP VM (HTTPS)"
+name: "Deploy MCP Server on GCP VM"
 
 # ============================================================
-# Purpose   : Resizes postgres-vm to e2-medium, installs
-#             FastMCP server as a systemd service behind Nginx
-#             with a self-signed TLS certificate.
+# Purpose   : Installs FastMCP server on existing postgres-vm
+#             as a systemd service behind Nginx with HTTPS.
 #
-#             Uses true MCP Streamable HTTP protocol — stateful
-#             sessions, full initialize handshake, no shortcuts.
+# Pre-req   : VM already resized to e2-medium and running.
+#             Workflows 1 + 2 completed (PostgreSQL running).
+#             mcp-server/main.py exists in repo root.
 #
-# Architecture after deployment:
+# Architecture:
 #   Claude Code (laptop)
-#     ↓ HTTPS port 443 (self-signed cert, --no-verify-ssl)
+#     ↓ HTTPS port 443 (self-signed cert, rejectUnauthorized:false)
 #   Nginx on postgres-vm
 #     ↓ HTTP localhost:8000
-#   FastMCP server (systemd service)
+#   FastMCP server (systemd, stateful sessions)
 #     ↓ psycopg2 localhost:5432
 #   PostgreSQL (same VM)
-#
-# Pre-req   : Workflows 1 + 2 completed. VM running with PostgreSQL.
-#             mcp-server/main.py exists in repo root.
 #
 # Secrets required (all existing):
 #   GCP_PROJECT_ID / GCP_WORKLOAD_IDENTITY_PROVIDER / GCP_SERVICE_ACCOUNT
 #   POSTGRES_PASSWORD / MCP_BEARER_TOKEN
-#
-# After deployment:
-#   Add to Claude Code:
-#   claude mcp add-json retail-postgres \
-#     '{"type":"http","url":"https://<VM_IP>/mcp/",
-#       "headers":{"Authorization":"Bearer <token>"},
-#       "transportOptions":{"rejectUnauthorized":false}}'
 # ============================================================
 
 on:
@@ -50,15 +40,6 @@ on:
           - us-central1-b
           - us-east1-b
           - us-west1-a
-      new_machine_type:
-        description: "New machine type (VM will be resized)"
-        required: true
-        default: "e2-medium"
-        type: choice
-        options:
-          - e2-medium
-          - e2-standard-2
-          - e2-small
       mcp_port:
         description: "Internal port FastMCP listens on"
         required: true
@@ -77,7 +58,7 @@ on:
 
 jobs:
   deploy-mcp-on-vm:
-    name: "MCP Server → ${{ inputs.vm_name }} (${{ inputs.new_machine_type }})"
+    name: "MCP Server → ${{ inputs.vm_name }}"
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -100,44 +81,24 @@ jobs:
           project_id: "${{ secrets.GCP_PROJECT_ID }}"
 
       # --------------------------------------------------------
-      # Step 1: Resize VM
-      # Resizing requires the VM to be stopped
+      # Pre-flight
       # --------------------------------------------------------
-      - name: Resize VM to ${{ inputs.new_machine_type }}
+      - name: Verify VM is Running
         run: |
-          VM_NAME="${{ inputs.vm_name }}"
-          ZONE="${{ inputs.zone }}"
-          NEW_TYPE="${{ inputs.new_machine_type }}"
-
-          CURRENT_TYPE=$(gcloud compute instances describe ${VM_NAME} \
-            --zone ${ZONE} \
-            --format 'value(machineType)' | awk -F/ '{print $NF}')
-
-          echo "Current machine type: ${CURRENT_TYPE}"
-          echo "Target machine type : ${NEW_TYPE}"
-
-          if [[ "${CURRENT_TYPE}" == "${NEW_TYPE}" ]]; then
-            echo "VM already ${NEW_TYPE} — skipping resize"
-          else
-            echo "Stopping VM for resize..."
-            gcloud compute instances stop ${VM_NAME} --zone ${ZONE} --quiet
-
-            echo "Resizing to ${NEW_TYPE}..."
-            gcloud compute instances set-machine-type ${VM_NAME} \
-              --zone ${ZONE} \
-              --machine-type ${NEW_TYPE}
-
-            echo "Starting VM..."
-            gcloud compute instances start ${VM_NAME} --zone ${ZONE} --quiet
-
-            echo "Waiting 30s for VM to fully start..."
-            sleep 30
+          STATUS=$(gcloud compute instances describe ${{ inputs.vm_name }} \
+            --zone ${{ inputs.zone }} \
+            --format 'value(status)' 2>/dev/null || echo "NOT_FOUND")
+          if [[ "$STATUS" != "RUNNING" ]]; then
+            echo "VM is $STATUS — must be RUNNING"
+            exit 1
           fi
-
-          echo "VM is ready"
+          MACHINE=$(gcloud compute instances describe ${{ inputs.vm_name }} \
+            --zone ${{ inputs.zone }} \
+            --format 'value(machineType)' | awk -F/ '{print $NF}')
+          echo "VM ${{ inputs.vm_name }} is RUNNING on $MACHINE"
 
       # --------------------------------------------------------
-      # Step 2: Open port 443 in firewall
+      # Step 1: Open port 443
       # --------------------------------------------------------
       - name: Open Port 443 in Firewall
         run: |
@@ -152,7 +113,6 @@ jobs:
               --description "Allow HTTPS access to MCP server"
             echo "Port 443 opened"
           fi
-
           EXISTING_TAGS=$(gcloud compute instances describe ${{ inputs.vm_name }} \
             --zone ${{ inputs.zone }} \
             --format 'value(tags.items)')
@@ -166,76 +126,54 @@ jobs:
           fi
 
       # --------------------------------------------------------
-      # Step 3: Install Python 3.11 and FastMCP
+      # Step 2: Install Python 3.11 and FastMCP
       # --------------------------------------------------------
       - name: Install Python and FastMCP
         run: |
-          MCP_PORT="${{ inputs.mcp_port }}"
-          PG_PASSWORD="${{ secrets.POSTGRES_PASSWORD }}"
-          MCP_BEARER_TOKEN="${{ secrets.MCP_BEARER_TOKEN }}"
-          PG_DB="${{ inputs.pg_db }}"
-          PG_USER="${{ inputs.pg_user }}"
-
           gcloud compute ssh ${{ inputs.vm_name }} \
             --zone ${{ inputs.zone }} \
             --tunnel-through-iap \
             --command "
               set -e
-
-              echo 'Installing Python 3.11 and dependencies...'
               while sudo fuser /var/lib/dpkg/lock-frontend 2>/dev/null; do sleep 5; done
               sudo apt-get update -qq
-              sudo apt-get install -y python3.11 python3.11-venv python3-pip nginx
-
-              echo 'Creating MCP server directory...'
-              sudo mkdir -p /opt/mcp-server
+              sudo apt-get install -y python3.11 python3.11-venv python3-pip
               sudo useradd -r -s /usr/sbin/nologin mcpserver 2>/dev/null || true
-              sudo chown mcpserver:mcpserver /opt/mcp-server
-
-              echo 'Creating Python virtual environment...'
+              sudo mkdir -p /opt/mcp-server /var/log/mcp-server
+              sudo chown mcpserver:mcpserver /opt/mcp-server /var/log/mcp-server
               sudo -u mcpserver python3.11 -m venv /opt/mcp-server/venv
-
-              echo 'Installing FastMCP and dependencies...'
               sudo -u mcpserver /opt/mcp-server/venv/bin/pip install \
                 --quiet --no-cache-dir \
                 'mcp[server]>=1.25,<2' \
                 'uvicorn[standard]==0.32.1' \
                 'fastapi==0.115.5' \
                 'psycopg2-binary==2.9.10'
-
-              echo 'FastMCP installed:'
-              sudo -u mcpserver /opt/mcp-server/venv/bin/python \
-                -c 'import mcp; print(mcp.__version__)'
+              echo 'FastMCP version:' \$(/opt/mcp-server/venv/bin/python -c 'import mcp; print(mcp.__version__)')
             "
           echo "Python and FastMCP installed"
 
       # --------------------------------------------------------
-      # Step 4: Copy MCP server code to VM
+      # Step 3: Copy MCP server code
       # --------------------------------------------------------
-      - name: Copy MCP Server Code to VM
+      - name: Copy MCP Server Code
         run: |
           gcloud compute scp mcp-server/main.py \
             ${{ inputs.vm_name }}:/tmp/main.py \
             --zone ${{ inputs.zone }} \
             --tunnel-through-iap
-          echo "main.py copied to VM"
-
-      - name: Install MCP Server Code
-        run: |
           gcloud compute ssh ${{ inputs.vm_name }} \
             --zone ${{ inputs.zone }} \
             --tunnel-through-iap \
             --command "
               sudo cp /tmp/main.py /opt/mcp-server/main.py
               sudo chown mcpserver:mcpserver /opt/mcp-server/main.py
-              echo 'MCP server code installed'
+              echo 'main.py installed'
             "
 
       # --------------------------------------------------------
-      # Step 5: Write environment file and systemd service
-      # Both written locally then scp'd — avoids heredoc issues
+      # Step 4: Write config files locally then scp
       # --------------------------------------------------------
-      - name: Write Environment and Service Files
+      - name: Write Config Files
         run: |
           MCP_PORT="${{ inputs.mcp_port }}"
           PG_PASSWORD="${{ secrets.POSTGRES_PASSWORD }}"
@@ -243,110 +181,78 @@ jobs:
           PG_DB="${{ inputs.pg_db }}"
           PG_USER="${{ inputs.pg_user }}"
 
-          # Environment file — use printf to avoid heredoc/YAML conflicts
           printf 'PG_HOST=localhost\nPG_PORT=5432\nPG_DB=%s\nPG_USER=%s\nPG_PASSWORD=%s\nMCP_BEARER_TOKEN=%s\n' \
             "$PG_DB" "$PG_USER" "$PG_PASSWORD" "$MCP_BEARER_TOKEN" > /tmp/mcp-server.env
 
-          # systemd service — use printf to avoid heredoc/YAML conflicts
-          printf '[Unit]\nDescription=Retail FastMCP Server\nAfter=network.target postgresql.service\nWants=postgresql.service\n\n[Service]\nType=simple\nUser=mcpserver\nGroup=mcpserver\nWorkingDirectory=/opt/mcp-server\nEnvironmentFile=/opt/mcp-server/.env\nExecStart=/opt/mcp-server/venv/bin/uvicorn main:app --host 127.0.0.1 --port %s --workers 1\nRestart=always\nRestartSec=5\nStandardOutput=append:/var/log/mcp-server/mcp.log\nStandardError=append:/var/log/mcp-server/mcp.log\n\n[Install]\nWantedBy=multi-user.target\n' \
+          printf '[Unit]\nDescription=Retail FastMCP Server\nAfter=network.target postgresql.service\n\n[Service]\nType=simple\nUser=mcpserver\nGroup=mcpserver\nWorkingDirectory=/opt/mcp-server\nEnvironmentFile=/opt/mcp-server/.env\nExecStart=/opt/mcp-server/venv/bin/uvicorn main:app --host 127.0.0.1 --port %s --workers 1\nRestart=always\nRestartSec=5\nStandardOutput=append:/var/log/mcp-server/mcp.log\nStandardError=append:/var/log/mcp-server/mcp.log\n\n[Install]\nWantedBy=multi-user.target\n' \
             "$MCP_PORT" > /tmp/mcp-server.service
 
           echo "Config files written"
-          cat /tmp/mcp-server.env | sed 's/PASSWORD=.*/PASSWORD=***/' "
 
-      - name: Copy Config Files to VM
+      - name: Copy and Install Config Files
         run: |
           gcloud compute scp /tmp/mcp-server.env \
             ${{ inputs.vm_name }}:/tmp/mcp-server.env \
             --zone ${{ inputs.zone }} \
             --tunnel-through-iap
-
           gcloud compute scp /tmp/mcp-server.service \
             ${{ inputs.vm_name }}:/tmp/mcp-server.service \
             --zone ${{ inputs.zone }} \
             --tunnel-through-iap
-          echo "Config files copied"
-
-      - name: Install and Start MCP systemd Service
-        run: |
           gcloud compute ssh ${{ inputs.vm_name }} \
             --zone ${{ inputs.zone }} \
             --tunnel-through-iap \
             --command "
               set -e
-
-              echo 'Installing environment file...'
               sudo mv /tmp/mcp-server.env /opt/mcp-server/.env
               sudo chmod 600 /opt/mcp-server/.env
               sudo chown mcpserver:mcpserver /opt/mcp-server/.env
-
-              echo 'Creating log directory...'
-              sudo mkdir -p /var/log/mcp-server
-              sudo chown mcpserver:mcpserver /var/log/mcp-server
-
-              echo 'Installing systemd service...'
               sudo mv /tmp/mcp-server.service /etc/systemd/system/mcp-server.service
               sudo systemctl daemon-reload
               sudo systemctl enable mcp-server
               sudo systemctl restart mcp-server
               sleep 3
               sudo systemctl status mcp-server --no-pager
-
               echo 'MCP service running'
             "
           echo "MCP systemd service started"
 
       # --------------------------------------------------------
-      # Step 6: Generate self-signed TLS certificate
-      # Common Name = VM static IP for direct IP HTTPS access
+      # Step 5: Self-signed TLS certificate
       # --------------------------------------------------------
-      - name: Generate Self-Signed TLS Certificate
+      - name: Generate TLS Certificate
         run: |
-          ZONE="${{ inputs.zone }}"
-          VM_NAME="${{ inputs.vm_name }}"
-
-          VM_IP=$(gcloud compute instances describe ${VM_NAME} \
-            --zone ${ZONE} \
+          VM_IP=$(gcloud compute instances describe ${{ inputs.vm_name }} \
+            --zone ${{ inputs.zone }} \
             --format 'value(networkInterfaces[0].accessConfigs[0].natIP)')
-
           echo "Generating self-signed cert for IP: ${VM_IP}"
-
-          gcloud compute ssh ${VM_NAME} \
-            --zone ${ZONE} \
+          gcloud compute ssh ${{ inputs.vm_name }} \
+            --zone ${{ inputs.zone }} \
             --tunnel-through-iap \
             --command "
               set -e
               sudo mkdir -p /etc/nginx/ssl
-
               sudo openssl req -x509 -nodes -days 365 \
                 -newkey rsa:2048 \
                 -keyout /etc/nginx/ssl/mcp-server.key \
                 -out    /etc/nginx/ssl/mcp-server.crt \
-                -subj '/CN=${VM_IP}/O=Retail MCP/C=US' \
+                -subj '/CN=${VM_IP}/O=RetailMCP/C=US' \
                 -addext 'subjectAltName=IP:${VM_IP}'
-
               sudo chmod 600 /etc/nginx/ssl/mcp-server.key
-              sudo chmod 644 /etc/nginx/ssl/mcp-server.crt
-
-              echo 'TLS certificate generated:'
+              echo 'Certificate generated:'
               sudo openssl x509 -noout -subject -dates -in /etc/nginx/ssl/mcp-server.crt
             "
-          echo "Self-signed TLS certificate created"
+          echo "TLS certificate created"
 
       # --------------------------------------------------------
-      # Step 7: Write Nginx config locally then scp to VM
+      # Step 6: Configure Nginx
       # --------------------------------------------------------
-      - name: Write Nginx Config
+      - name: Configure Nginx
         run: |
           MCP_PORT="${{ inputs.mcp_port }}"
+          printf 'server {\n    listen 443 ssl;\n    server_name _;\n    ssl_certificate     /etc/nginx/ssl/mcp-server.crt;\n    ssl_certificate_key /etc/nginx/ssl/mcp-server.key;\n    ssl_protocols       TLSv1.2 TLSv1.3;\n    location / {\n        proxy_pass http://127.0.0.1:%s;\n        proxy_set_header Host $host;\n        proxy_set_header X-Forwarded-Proto https;\n        proxy_read_timeout 300;\n        proxy_connect_timeout 300;\n    }\n}\nserver {\n    listen 80;\n    return 301 https://$host$request_uri;\n}\n' \
+            "$MCP_PORT" > /tmp/mcp_nginx.conf
 
-          printf 'server {\n    listen 443 ssl;\n    server_name _;\n\n    ssl_certificate     /etc/nginx/ssl/mcp-server.crt;\n    ssl_certificate_key /etc/nginx/ssl/mcp-server.key;\n    ssl_protocols       TLSv1.2 TLSv1.3;\n    ssl_ciphers         HIGH:!aNULL:!MD5;\n\n    location / {\n        proxy_pass http://127.0.0.1:%s;\n        proxy_set_header Host $host;\n        proxy_set_header X-Real-IP $remote_addr;\n        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;\n        proxy_set_header X-Forwarded-Proto https;\n        proxy_read_timeout 300;\n        proxy_connect_timeout 300;\n        proxy_send_timeout 300;\n    }\n}\n\nserver {\n    listen 80;\n    return 301 https://$host$request_uri;\n}\n' "$MCP_PORT" > /tmp/mcp_nginx.conf
-
-          echo "Nginx config written:"
-          cat /tmp/mcp_nginx.conf
-
-      - name: Copy and Apply Nginx Config
-        run: |
           gcloud compute scp /tmp/mcp_nginx.conf \
             ${{ inputs.vm_name }}:/tmp/mcp_nginx.conf \
             --zone ${{ inputs.zone }} \
@@ -362,104 +268,58 @@ jobs:
               sudo rm -f /etc/nginx/sites-enabled/default
               sudo nginx -t
               sudo systemctl restart nginx
-              echo 'Nginx configured and running'
+              echo 'Nginx running'
             "
           echo "Nginx configured"
 
       # --------------------------------------------------------
-      # Step 8: Smoke test
+      # Step 7: Smoke test and print connection details
       # --------------------------------------------------------
-      - name: Smoke Test MCP Server
+      - name: Smoke Test
         run: |
-          VM_NAME="${{ inputs.vm_name }}"
-          ZONE="${{ inputs.zone }}"
-
-          VM_IP=$(gcloud compute instances describe ${VM_NAME} \
-            --zone ${ZONE} \
-            --format 'value(networkInterfaces[0].accessConfigs[0].natIP)')
-
-          echo "Testing MCP server at https://${VM_IP}..."
-
-          gcloud compute ssh ${VM_NAME} \
-            --zone ${ZONE} \
+          gcloud compute ssh ${{ inputs.vm_name }} \
+            --zone ${{ inputs.zone }} \
             --tunnel-through-iap \
             --command "
               sleep 3
               HTTP_CODE=\$(curl -sk -o /dev/null -w '%{http_code}' https://localhost/health)
-              echo \"Health check response: \${HTTP_CODE}\"
+              echo Health check: \${HTTP_CODE}
               if [[ \"\${HTTP_CODE}\" == \"200\" ]]; then
-                echo 'MCP server is healthy'
                 curl -sk https://localhost/health
+                echo ''
+                echo 'MCP server is healthy'
               else
-                echo 'Unexpected response — checking logs:'
                 sudo tail -20 /var/log/mcp-server/mcp.log || true
-                sudo systemctl status mcp-server --no-pager || true
                 exit 1
               fi
             "
-          echo "Smoke test passed"
 
-      # --------------------------------------------------------
-      # Step 9: Print Claude Code registration command
-      # --------------------------------------------------------
       - name: Print Connection Summary
         run: |
-          VM_NAME="${{ inputs.vm_name }}"
-          ZONE="${{ inputs.zone }}"
-
-          VM_IP=$(gcloud compute instances describe ${VM_NAME} \
-            --zone ${ZONE} \
+          VM_IP=$(gcloud compute instances describe ${{ inputs.vm_name }} \
+            --zone ${{ inputs.zone }} \
             --format 'value(networkInterfaces[0].accessConfigs[0].natIP)')
+          TOKEN="${{ secrets.MCP_BEARER_TOKEN }}"
 
-          MCP_TOKEN="${{ secrets.MCP_BEARER_TOKEN }}"
-
           echo ""
           echo "=============================================="
-          echo "MCP SERVER DEPLOYED ON VM — READY"
+          echo "MCP SERVER READY ON VM"
           echo "=============================================="
           echo ""
-          echo "VM            : ${VM_NAME} (${ZONE})"
-          echo "Machine type  : ${{ inputs.new_machine_type }}"
-          echo "Static IP     : ${VM_IP}"
-          echo "Protocol      : MCP Streamable HTTP (stateful)"
-          echo "Transport     : HTTPS port 443 (self-signed cert)"
+          echo "Endpoint : https://${VM_IP}/mcp/"
+          echo "Health   : https://${VM_IP}/health"
+          echo "Protocol : MCP Streamable HTTP (stateful)"
           echo ""
-          echo "MCP endpoint  : https://${VM_IP}/mcp/"
-          echo "Health check  : https://${VM_IP}/health"
-          echo ""
-          echo "=============================================="
           echo "ADD TO CLAUDE CODE (run on your laptop):"
-          echo "=============================================="
           echo ""
           echo "claude mcp add-json retail-postgres \\"
-          echo "  '{\"type\":\"http\",\"url\":\"https://${VM_IP}/mcp/\",\"headers\":{\"Authorization\":\"Bearer ${MCP_TOKEN}\"},\"transportOptions\":{\"rejectUnauthorized\":false}}'"
+          echo "  '{\"type\":\"http\",\"url\":\"https://${VM_IP}/mcp/\",\"headers\":{\"Authorization\":\"Bearer ${TOKEN}\"},\"transportOptions\":{\"rejectUnauthorized\":false}}'"
           echo ""
-          echo "Then start Claude Code:"
-          echo "  claude"
+          echo "Then: claude"
+          echo "Then: /mcp   (verify connection)"
           echo ""
-          echo "Verify connection:"
-          echo "  /mcp"
-          echo ""
-          echo "=============================================="
-          echo "TRUST CERT ON YOUR MAC (one-time):"
-          echo "=============================================="
-          echo ""
-          echo "Option A — add --no-verify-ssl flag (easiest):"
-          echo "  Already handled by rejectUnauthorized:false above"
-          echo ""
-          echo "Option B — trust cert in Mac Keychain:"
-          echo "  1. curl -sk https://${VM_IP}/health -o /dev/null"
-          echo "     (just to trigger the cert download)"
-          echo "  2. Open Keychain Access on Mac"
-          echo "  3. Add /etc/nginx/ssl/mcp-server.crt to System keychain"
-          echo "  4. Set to Always Trust"
-          echo ""
-          echo "=============================================="
-          echo "SERVICE MANAGEMENT (SSH into VM):"
-          echo "=============================================="
-          echo ""
+          echo "Service management on VM:"
           echo "  sudo systemctl status  mcp-server"
           echo "  sudo systemctl restart mcp-server"
           echo "  sudo tail -f /var/log/mcp-server/mcp.log"
-          echo ""
           echo "=============================================="
