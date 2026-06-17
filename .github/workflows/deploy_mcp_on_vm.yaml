@@ -1,4 +1,4 @@
-name: "8 - Deploy MCP Server on GCP VM (HTTPS)"
+name: "Deploy MCP Server on GCP VM (HTTPS)"
 
 # ============================================================
 # Purpose   : Resizes postgres-vm to e2-medium, installs
