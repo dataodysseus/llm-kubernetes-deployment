@@ -174,18 +174,24 @@ jobs:
           set -e
           EMAIL="$1"
           PASSWORD="$2"
+          PYTHON=/usr/pgadmin4/venv/bin/python3
+          SETUP=/usr/pgadmin4/web/setup.py
 
-          echo "=== setup.py commands ==="
-          /usr/pgadmin4/venv/bin/python3 /usr/pgadmin4/web/setup.py --help 2>&1 || true
-          echo "========================="
+          echo "=== Step 1: setup-db ==="
+          sudo -u pgadmin HOME=/var/lib/pgadmin4 "$PYTHON" "$SETUP" setup-db
+          echo "Database initialised"
 
-          if /usr/pgadmin4/venv/bin/python3 /usr/pgadmin4/web/setup.py --help 2>&1 | grep -q 'create-admin'; then
-            echo "Running: setup.py create-admin"
-            sudo /usr/pgadmin4/venv/bin/python3 /usr/pgadmin4/web/setup.py \
-              create-admin --email "$EMAIL" --password "$PASSWORD"
+          echo "=== add-user flags ==="
+          "$PYTHON" "$SETUP" add-user --help 2>&1 || true
+          echo "======================"
+
+          echo "=== Step 2: add-user ==="
+          if "$PYTHON" "$SETUP" add-user --help 2>&1 | grep -q -- '--email'; then
+            sudo -u pgadmin HOME=/var/lib/pgadmin4 "$PYTHON" "$SETUP" add-user \
+              --email "$EMAIL" --password "$PASSWORD" --admin
           else
-            echo "ERROR: 'create-admin' not found in setup.py. See help output above."
-            exit 1
+            sudo -u pgadmin HOME=/var/lib/pgadmin4 "$PYTHON" "$SETUP" add-user \
+              --user "$EMAIL" --password "$PASSWORD" --admin
           fi
           echo "pgAdmin DB initialised"
           INITEOF
