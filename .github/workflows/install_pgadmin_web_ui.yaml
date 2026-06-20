@@ -58,7 +58,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Authenticate with Workload Identity Federation
         uses: google-github-actions/auth@v2
@@ -68,7 +68,7 @@ jobs:
           service_account: "${{ secrets.GCP_SERVICE_ACCOUNT }}"
 
       - name: Set up Google Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1
+        uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: "${{ secrets.GCP_PROJECT_ID }}"
 
@@ -173,13 +173,13 @@ jobs:
             --tunnel-through-iap \
             --command "set -e &&
               sudo cp /tmp/config_local.py /usr/pgadmin4/web/config_local.py &&
-              sudo PGADMIN_SETUP_EMAIL='${{ secrets.PGADMIN_EMAIL }}' \
+              sudo env PGADMIN_SETUP_EMAIL='${{ secrets.PGADMIN_EMAIL }}' \
                 PGADMIN_SETUP_PASSWORD='${{ secrets.PGADMIN_PASSWORD }}' \
                 /usr/pgadmin4/bin/setup-web.sh --yes &&
               echo pgAdmin DB initialised"
           echo "pgAdmin database initialised"
 
-            # --------------------------------------------------------
+      # --------------------------------------------------------
       # Install and start pgAdmin4 as systemd service
       # --------------------------------------------------------
       - name: Start pgAdmin4 Service
