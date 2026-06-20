@@ -168,29 +168,43 @@ jobs:
       # --------------------------------------------------------
       - name: Initialise pgAdmin Database
         run: |
+          # Write a self-contained init script on the runner to avoid shell-escaping secrets
+          cat > /tmp/pgadmin_init.sh << 'INITEOF'
+          #!/bin/bash
+          set -e
+          EMAIL="$1"
+          PASSWORD="$2"
+
+          echo "=== setup.py commands ==="
+          /usr/pgadmin4/venv/bin/python3 /usr/pgadmin4/web/setup.py --help 2>&1 || true
+          echo "========================="
+
+          if /usr/pgadmin4/venv/bin/python3 /usr/pgadmin4/web/setup.py --help 2>&1 | grep -q 'create-admin'; then
+            echo "Running: setup.py create-admin"
+            sudo /usr/pgadmin4/venv/bin/python3 /usr/pgadmin4/web/setup.py \
+              create-admin --email "$EMAIL" --password "$PASSWORD"
+          else
+            echo "ERROR: 'create-admin' not found in setup.py. See help output above."
+            exit 1
+          fi
+          echo "pgAdmin DB initialised"
+          INITEOF
+          chmod +x /tmp/pgadmin_init.sh
+
+          # Copy init script and config to the VM
+          gcloud compute scp /tmp/pgadmin_init.sh ${{ inputs.vm_name }}:/tmp/pgadmin_init.sh \
+            --zone ${{ inputs.zone }} --tunnel-through-iap
+          gcloud compute scp pgadmin-config/config_local.py ${{ inputs.vm_name }}:/tmp/config_local.py \
+            --zone ${{ inputs.zone }} --tunnel-through-iap
+
+          # Run it — secrets passed as positional args, never appear in the script file
           gcloud compute ssh ${{ inputs.vm_name }} \
             --zone ${{ inputs.zone }} \
             --tunnel-through-iap \
             --command "set -e &&
               sudo cp /tmp/config_local.py /usr/pgadmin4/web/config_local.py &&
-              echo 'Locating pgAdmin4 setup entry point...' &&
-              SETUP_SH=\$(find /usr/pgadmin4 -name 'setup-web.sh' 2>/dev/null | head -1) &&
-              if [ -n \"\$SETUP_SH\" ]; then
-                echo \"Using shell script: \$SETUP_SH\" &&
-                sudo env PGADMIN_SETUP_EMAIL='${{ secrets.PGADMIN_EMAIL }}' \
-                  PGADMIN_SETUP_PASSWORD='${{ secrets.PGADMIN_PASSWORD }}' \
-                  \"\$SETUP_SH\" --yes
-              elif [ -f /usr/pgadmin4/web/setup.py ]; then
-                echo 'Using setup.py via venv Python' &&
-                sudo env PGADMIN_SETUP_EMAIL='${{ secrets.PGADMIN_EMAIL }}' \
-                  PGADMIN_SETUP_PASSWORD='${{ secrets.PGADMIN_PASSWORD }}' \
-                  /usr/pgadmin4/venv/bin/python3 /usr/pgadmin4/web/setup.py
-              else
-                echo 'ERROR: no pgAdmin4 setup entry point found. Installed files:' &&
-                find /usr/pgadmin4 \( -name '*.sh' -o -name 'setup.py' \) 2>/dev/null | sort &&
-                exit 1
-              fi &&
-              echo pgAdmin DB initialised"
+              bash /tmp/pgadmin_init.sh '${{ secrets.PGADMIN_EMAIL }}' '${{ secrets.PGADMIN_PASSWORD }}' &&
+              rm /tmp/pgadmin_init.sh"
           echo "pgAdmin database initialised"
 
       # --------------------------------------------------------
