@@ -69,7 +69,7 @@ jobs:
 
     steps:
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Authenticate with Workload Identity Federation
         uses: google-github-actions/auth@v2
@@ -79,7 +79,7 @@ jobs:
           service_account: "${{ secrets.GCP_SERVICE_ACCOUNT }}"
 
       - name: Set up Google Cloud SDK
-        uses: google-github-actions/setup-gcloud@v1
+        uses: google-github-actions/setup-gcloud@v2
         with:
           project_id: "${{ secrets.GCP_PROJECT_ID }}"
 
@@ -239,7 +239,7 @@ jobs:
           echo "  pgAdmin UI  : http://${STATIC_IP}"
           echo "  PostgreSQL  : postgresql://appuser:<password>@${STATIC_IP}:5432/appdb"
           echo ""
-          echo "Note: This static IP is billed at ~$0.01/hr when the VM"
+          echo "Note: This static IP is billed at ~\$0.01/hr when the VM"
           echo "is STOPPED. It is free while the VM is RUNNING."
           echo ""
           echo "To release it later (stop billing):"
