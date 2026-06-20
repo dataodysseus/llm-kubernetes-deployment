@@ -30,7 +30,7 @@ on:
       vm_name:
         description: "VM instance name (lowercase, hyphens only)"
         required: true
-        default: "my-vm"
+        default: "postgres-vm"
         type: string
 
       # ----------------------------------------------------------
