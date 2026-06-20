@@ -170,7 +170,7 @@ jobs:
       # Auth
       # --------------------------------------------------------
       - name: Checkout code
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4
 
       - name: Authenticate with Workload Identity Federation
         uses: google-github-actions/auth@v2
@@ -243,25 +243,31 @@ jobs:
             --image-project ${OS_IMAGE_PROJECT} \
             --boot-disk-size ${DISK_SIZE}GB \
             --boot-disk-type ${DISK_TYPE} \
-            --tags ${TAGS} \
+            --tags $(echo "${TAGS}" | tr ',' ' ') \
             --metadata enable-oslogin=TRUE \
             --scopes https://www.googleapis.com/auth/cloud-platform
 
           echo "✅ VM created successfully"
-          echo "⏳ Waiting 30s for VM to fully initialize..."
-          sleep 30
 
       # --------------------------------------------------------
       # Smoke test — confirm VM is reachable via IAP
       # --------------------------------------------------------
       - name: Verify VM is Reachable via IAP
         run: |
-          echo "🔍 Verifying IAP SSH connectivity..."
-          gcloud compute ssh ${{ inputs.vm_name }} \
-            --zone ${{ inputs.zone }} \
-            --tunnel-through-iap \
-            --command "echo '✅ IAP SSH connection successful' && uname -a && df -h /"
-          echo "✅ VM is reachable"
+          echo "🔍 Verifying IAP SSH connectivity (retrying up to 10x, 15s apart)..."
+          for i in $(seq 1 10); do
+            if gcloud compute ssh ${{ inputs.vm_name }} \
+                --zone ${{ inputs.zone }} \
+                --tunnel-through-iap \
+                --command "echo '✅ IAP SSH connection successful' && uname -a && df -h /" 2>/dev/null; then
+              echo "✅ VM is reachable (attempt ${i})"
+              exit 0
+            fi
+            echo "⏳ Attempt ${i}/10 failed — retrying in 15s..."
+            sleep 15
+          done
+          echo "❌ VM did not become reachable after 10 attempts"
+          exit 1
 
       # --------------------------------------------------------
       # Summary
@@ -297,7 +303,14 @@ jobs:
           echo "🔒 Internal IP   : ${INTERNAL_IP}"
           echo ""
           echo "📋 Next steps:"
-          echo "   Run Workflow 2 (Install PostgreSQL) with:"
+          echo "   ⚠️  Public IP above is EPHEMERAL — it changes if the VM restarts."
+          echo "   Run 'Reserve and Assign Static IP to GCP VM' workflow first:"
+          echo "   • vm_name        → ${VM_NAME}"
+          echo "   • zone           → ${ZONE}"
+          echo "   • region         → ${{ inputs.region }}"
+          echo "   • static_ip_name → ${VM_NAME}-static-ip"
+          echo ""
+          echo "   Then run Workflow 2 (Install PostgreSQL) with:"
           echo "   • vm_name  → ${VM_NAME}"
           echo "   • zone     → ${ZONE}"
           echo ""
