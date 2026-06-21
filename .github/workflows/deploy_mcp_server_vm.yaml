@@ -190,12 +190,12 @@ jobs:
               sudo -u mcpserver python3.11 -m venv /opt/mcp-server/venv
               sudo -u mcpserver /opt/mcp-server/venv/bin/pip install \
                 --quiet --no-cache-dir \
-                'mcp>=1.25' \
+                'mcp[server]>=1.25,<2' \
                 'uvicorn[standard]==0.32.1' \
                 'fastapi==0.115.5' \
                 'psycopg2-binary==2.9.10'
-              MCP_VER=$(/opt/mcp-server/venv/bin/python -c 'import mcp.server.fastmcp; print("FastMCP OK")')
-              echo "FastMCP: $MCP_VER"
+              MCP_VER=\$(/opt/mcp-server/venv/bin/python -c 'import mcp; print(mcp.__version__)')
+              echo \"FastMCP version: \$MCP_VER\"
             "
           echo "Python and FastMCP installed"
 
