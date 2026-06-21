@@ -189,13 +189,8 @@ jobs:
           echo "======================"
 
           echo "=== Step 2: add-user ==="
-          if "$PYTHON" "$SETUP" add-user --help 2>&1 | grep -q -- '--email'; then
-            sudo -u pgadmin HOME=/var/lib/pgadmin4 "$PYTHON" "$SETUP" add-user \
-              --email "$EMAIL" --password "$PASSWORD" --admin
-          else
-            sudo -u pgadmin HOME=/var/lib/pgadmin4 "$PYTHON" "$SETUP" add-user \
-              --user "$EMAIL" --password "$PASSWORD" --admin
-          fi
+          sudo -u pgadmin HOME=/var/lib/pgadmin4 "$PYTHON" "$SETUP" add-user \
+            --admin "$EMAIL" "$PASSWORD"
           echo "pgAdmin DB initialised"
           INITEOF
           chmod +x /tmp/pgadmin_init.sh
