@@ -184,29 +184,13 @@ jobs:
             "$PYTHON" "$SETUP" setup-db
           echo "Database initialised"
 
-          echo "=== Available setup.py commands ==="
-          "$PYTHON" "$SETUP" --help 2>&1 || true
-          echo "==================================="
-
           echo "=== add-user flags ==="
           "$PYTHON" "$SETUP" add-user --help 2>&1 || true
           echo "======================"
 
-          echo "=== Step 2: add-user (creates if missing) ==="
-          # add-user fails harmlessly if the user already exists; don't abort.
+          echo "=== Step 2: add-user ==="
           sudo -u pgadmin HOME=/var/lib/pgadmin4 "$PYTHON" "$SETUP" add-user \
-            --admin "$EMAIL" "$PASSWORD" || echo "add-user skipped (user may already exist)"
-
-          echo "=== Step 3: update-user (resets password for existing user) ==="
-          # This is what makes re-running the workflow actually change the password.
-          if "$PYTHON" "$SETUP" update-user --help >/dev/null 2>&1; then
-            sudo -u pgadmin HOME=/var/lib/pgadmin4 "$PYTHON" "$SETUP" update-user \
-              "$EMAIL" "$PASSWORD"
-            echo "Password reset for $EMAIL"
-          else
-            echo "WARNING: 'update-user' command not available in this pgAdmin version."
-            echo "Existing user password was NOT changed. See manual reset note."
-          fi
+            --admin "$EMAIL" "$PASSWORD"
           echo "pgAdmin DB initialised"
           INITEOF
           chmod +x /tmp/pgadmin_init.sh
