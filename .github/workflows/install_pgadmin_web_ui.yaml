@@ -178,7 +178,10 @@ jobs:
           SETUP=/usr/pgadmin4/web/setup.py
 
           echo "=== Step 1: setup-db ==="
-          sudo -u pgadmin HOME=/var/lib/pgadmin4 "$PYTHON" "$SETUP" setup-db
+          sudo -u pgadmin HOME=/var/lib/pgadmin4 \
+            PGADMIN_SETUP_EMAIL="$EMAIL" \
+            PGADMIN_SETUP_PASSWORD="$PASSWORD" \
+            "$PYTHON" "$SETUP" setup-db
           echo "Database initialised"
 
           echo "=== add-user flags ==="
