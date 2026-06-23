@@ -1,0 +1,162 @@
+name: "Deploy Retail MCP Server (Stdio/IAP)"
+
+on:
+  workflow_dispatch:
+    inputs:
+      mcp_vm_name:
+        description: "MCP server VM name"
+        required: true
+        default: "mcp-vm"
+        type: string
+      zone:
+        description: "GCP zone"
+        required: true
+        default: "us-central1-a"
+        type: choice
+        options:
+          - us-central1-a
+          - us-central1-b
+          - us-east1-b
+          - us-west1-a
+      pg_vm_ip:
+        description: "PostgreSQL VM static IP (postgres-vm)"
+        required: true
+        default: "34.9.255.250"
+        type: string
+      pg_db:
+        description: "PostgreSQL database name"
+        required: true
+        default: "appdb"
+        type: string
+      pg_user:
+        description: "PostgreSQL user"
+        required: true
+        default: "appuser"
+        type: string
+
+jobs:
+  deploy-mcp-stdio:
+    name: "Deploy MCP Stdio → ${{ inputs.mcp_vm_name }}"
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      id-token: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Authenticate with Workload Identity Federation
+        uses: google-github-actions/auth@v2
+        with:
+          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+          workload_identity_provider: "${{ secrets.GCP_WORKLOAD_IDENTITY_PROVIDER }}"
+          service_account: "${{ secrets.GCP_SERVICE_ACCOUNT }}"
+
+      - name: Set up Google Cloud SDK
+        uses: google-github-actions/setup-gcloud@v2
+        with:
+          project_id: "${{ secrets.GCP_PROJECT_ID }}"
+
+      - name: Verify VM and Get IP
+        run: |
+          STATUS=$(gcloud compute instances describe ${{ inputs.mcp_vm_name }} \
+            --zone ${{ inputs.zone }} --format 'value(status)')
+          if [[ "$STATUS" != "RUNNING" ]]; then
+            echo "mcp-vm must be RUNNING"
+            exit 1
+          fi
+          MCP_IP=$(gcloud compute instances describe ${{ inputs.mcp_vm_name }} \
+            --zone ${{ inputs.zone }} --format 'value(networkInterfaces[0].accessConfigs[0].natIP)')
+          echo "MCP_VM_IP=$MCP_IP" >> $GITHUB_ENV
+
+      # Cleanup legacy Phase 1/2 infrastructure
+      - name: Teardown Legacy Services (Nginx/systemd)
+        run: |
+          gcloud compute ssh ${{ inputs.mcp_vm_name }} \
+            --zone ${{ inputs.zone }} \
+            --tunnel-through-iap \
+            --command "
+              sudo systemctl stop mcp-server nginx 2>/dev/null || true
+              sudo systemctl disable mcp-server nginx 2>/dev/null || true
+              sudo rm -f /etc/nginx/sites-enabled/mcp-server 2>/dev/null || true
+              sudo systemctl restart nginx 2>/dev/null || true
+            "
+          # Optionally remove the public HTTPS firewall rule
+          gcloud compute firewall-rules delete allow-https-mcp --quiet 2>/dev/null || true
+
+      - name: Allow mcp-vm to Reach PostgreSQL
+        run: |
+          MCP_IP="${{ env.MCP_VM_IP }}"
+          if gcloud compute firewall-rules describe allow-postgres-5432 --quiet 2>/dev/null; then
+            CURRENT=$(gcloud compute firewall-rules describe allow-postgres-5432 --format 'value(sourceRanges)')
+            if ! echo "$CURRENT" | grep -q "$MCP_IP"; then
+              gcloud compute firewall-rules update allow-postgres-5432 --source-ranges "$CURRENT,$MCP_IP/32"
+            fi
+          else
+            gcloud compute firewall-rules create allow-postgres-5432 \
+              --allow tcp:5432 --target-tags postgres-server --source-ranges "$MCP_IP/32"
+          fi
+
+      - name: Install Python and FastMCP (Stdio only)
+        run: |
+          gcloud compute ssh ${{ inputs.mcp_vm_name }} \
+            --zone ${{ inputs.zone }} \
+            --tunnel-through-iap \
+            --command "
+              set -e
+              while sudo fuser /var/lib/dpkg/lock-frontend 2>/dev/null; do sleep 5; done
+              sudo apt-get update -qq
+              sudo apt-get install -y python3.11 python3.11-venv python3-pip
+              sudo mkdir -p /opt/mcp-server
+              
+              # Set permissions so any IAP SSH user can execute the environment
+              sudo chmod 777 /opt/mcp-server
+              
+              if [ ! -d '/opt/mcp-server/venv' ]; then
+                python3.11 -m venv /opt/mcp-server/venv
+              fi
+              
+              /opt/mcp-server/venv/bin/pip install --quiet --no-cache-dir 'mcp>=1.25' 'psycopg2-binary==2.9.10'
+            "
+
+      - name: Deploy Code and Secrets
+        run: |
+          # Write the environment file
+          printf 'PG_HOST=%s\nPG_PORT=5432\nPG_DB=%s\nPG_USER=%s\nPG_PASSWORD=%s\n' \
+            "${{ inputs.pg_vm_ip }}" "${{ inputs.pg_db }}" "${{ inputs.pg_user }}" \
+            "${{ secrets.POSTGRES_PASSWORD }}" > /tmp/mcp.env
+
+          # SCP files to VM
+          gcloud compute scp mcp-server-v2/main.py ${{ inputs.mcp_vm_name }}:/opt/mcp-server/main.py \
+            --zone ${{ inputs.zone }} --tunnel-through-iap
+          gcloud compute scp /tmp/mcp.env ${{ inputs.mcp_vm_name }}:/opt/mcp-server/.env \
+            --zone ${{ inputs.zone }} --tunnel-through-iap
+            
+          # Ensure execution permissions for the script
+          gcloud compute ssh ${{ inputs.mcp_vm_name }} \
+            --zone ${{ inputs.zone }} --tunnel-through-iap \
+            --command "chmod 755 /opt/mcp-server/main.py && chmod 644 /opt/mcp-server/.env"
+
+      - name: Print Connection Instructions
+        run: |
+          PROJECT_ID="${{ secrets.GCP_PROJECT_ID }}"
+          ZONE="${{ inputs.zone }}"
+          VM="${{ inputs.mcp_vm_name }}"
+
+          echo ""
+          echo "=============================================="
+          echo "RETAIL MCP SERVER DEPLOYED (STDIO)"
+          echo "=============================================="
+          echo "No public ports. No Nginx. Execution is handled natively over SSH."
+          echo ""
+          echo "Run this exact command in your Mac terminal to register the server:"
+          echo "=============================================="
+          echo "claude mcp remove retail-mcp 2>/dev/null || true"
+          echo ""
+          echo "claude mcp add retail-mcp gcloud compute ssh ${VM} \\"
+          echo "  --zone ${ZONE} \\"
+          echo "  --project ${PROJECT_ID} \\"
+          echo "  --tunnel-through-iap \\"
+          echo "  --command '/opt/mcp-server/venv/bin/python /opt/mcp-server/main.py'"
+          echo "=============================================="

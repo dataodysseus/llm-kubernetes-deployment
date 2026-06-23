@@ -13,9 +13,23 @@ import psycopg2
 import psycopg2.pool
 from mcp.server.fastmcp import FastMCP
 
-# MUST log to stderr. stdout is strictly reserved for the MCP protocol JSON stream.
+# MUST log to stderr for stdio transport
 logging.basicConfig(level=logging.INFO, stream=sys.stderr, format='%(levelname)s: %(message)s')
 logger = logging.getLogger(__name__)
+
+# --- NEW: Load environment variables directly from the file deployed by GH Actions ---
+def load_env():
+    try:
+        with open('/opt/mcp-server/.env') as f:
+            for line in f:
+                if '=' in line and not line.startswith('#'):
+                    k, v = line.strip().split('=', 1)
+                    os.environ[k] = v
+    except FileNotFoundError:
+        pass
+
+load_env()
+# -----------------------------------------------------------------------------------
 
 # ── Config ──────────────────────────────────────────────────
 PG_HOST     = os.environ.get("PG_HOST", "34.9.255.250")
@@ -23,8 +37,6 @@ PG_PORT     = int(os.environ.get("PG_PORT", "5432"))
 PG_DB       = os.environ.get("PG_DB", "appdb")
 PG_USER     = os.environ.get("PG_USER", "appuser")
 PG_PASSWORD = os.environ.get("PG_PASSWORD", "")
-
-_pool: psycopg2.pool.ThreadedConnectionPool | None = None
 
 def get_pool() -> psycopg2.pool.ThreadedConnectionPool:
     global _pool
