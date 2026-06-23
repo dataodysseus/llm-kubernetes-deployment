@@ -38,6 +38,8 @@ PG_DB       = os.environ.get("PG_DB", "appdb")
 PG_USER     = os.environ.get("PG_USER", "appuser")
 PG_PASSWORD = os.environ.get("PG_PASSWORD", "")
 
+_pool = None
+
 def get_pool() -> psycopg2.pool.ThreadedConnectionPool:
     global _pool
     if _pool is None:
