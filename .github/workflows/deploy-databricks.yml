@@ -56,7 +56,7 @@ jobs:
 
     defaults:
       run:
-        working-directory: .   # Run from repo root
+        working-directory: databricks-gcp-deployment   # Run from repo root
 
     steps:
       # --------------------------------------------------------
