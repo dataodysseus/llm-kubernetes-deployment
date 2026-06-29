@@ -125,6 +125,25 @@ jobs:
       - name: Terraform Init
         run: terraform init -upgrade
 
+
+      - name: Import existing resources (if any)
+        working-directory: databricks-gcp-deployment
+        run: |
+          import_if_exists() {
+            terraform import "$1" "$2" 2>/dev/null && echo "Imported $1" || echo "Skipped $1 (not found)"
+          }
+          import_if_exists "module.gcp_iam.google_service_account.gke_node" \
+            "projects/genai-model-dev-deploy/serviceAccounts/databricks-gke-node-dev@genai-model-dev-deploy.iam.gserviceaccount.com"
+          import_if_exists "module.gcp_iam.google_service_account.storage" \
+            "projects/genai-model-dev-deploy/serviceAccounts/databricks-storage-dev@genai-model-dev-deploy.iam.gserviceaccount.com"
+          import_if_exists "module.gcp_iam.google_storage_bucket.dbfs_root" \
+            "databricks-dbfs-genai-model-dev-deploy-dev"
+          import_if_exists "module.gcp_networking.google_compute_network.databricks_vpc" \
+            "projects/genai-model-dev-deploy/global/networks/databricks-vpc-dev"
+        env:
+          TF_VAR_databricks_account_id: ${{ secrets.DATABRICKS_ACCOUNT_ID }}
+          TF_VAR_gcp_project_id: ${{ secrets.GCP_PROJECT_ID }}
+
       # --------------------------------------------------------
       # 7. Terraform Plan (always runs first)
       # --------------------------------------------------------
