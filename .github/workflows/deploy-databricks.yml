@@ -130,16 +130,59 @@ jobs:
         working-directory: databricks-gcp-deployment
         run: |
           import_if_exists() {
-            terraform import "$1" "$2" 2>/dev/null && echo "Imported $1" || echo "Skipped $1 (not found)"
+            local addr="$1"
+            local id="$2"
+            if terraform state show "$addr" > /dev/null 2>&1; then
+              echo "✓ Already in state: $addr"
+              return 0
+            fi
+            if terraform import "$addr" "$id" 2>&1; then
+              echo "✓ Imported: $addr"
+            else
+              echo "- Not found, will create: $addr"
+            fi
           }
-          import_if_exists "module.gcp_iam.google_service_account.gke_node" \
-            "projects/genai-model-dev-deploy/serviceAccounts/databricks-gke-node-dev@genai-model-dev-deploy.iam.gserviceaccount.com"
-          import_if_exists "module.gcp_iam.google_service_account.storage" \
-            "projects/genai-model-dev-deploy/serviceAccounts/databricks-storage-dev@genai-model-dev-deploy.iam.gserviceaccount.com"
-          import_if_exists "module.gcp_iam.google_storage_bucket.dbfs_root" \
-            "databricks-dbfs-genai-model-dev-deploy-dev"
-          import_if_exists "module.gcp_networking.google_compute_network.databricks_vpc" \
-            "projects/genai-model-dev-deploy/global/networks/databricks-vpc-dev"
+
+          PROJECT="genai-model-dev-deploy"
+          REGION="us-central1"
+
+          import_if_exists \
+            "module.gcp_iam.google_service_account.gke_node" \
+            "projects/${PROJECT}/serviceAccounts/databricks-gke-node-dev@${PROJECT}.iam.gserviceaccount.com"
+
+          import_if_exists \
+            "module.gcp_iam.google_service_account.storage" \
+            "projects/${PROJECT}/serviceAccounts/databricks-storage-dev@${PROJECT}.iam.gserviceaccount.com"
+
+          import_if_exists \
+            "module.gcp_iam.google_storage_bucket.dbfs_root" \
+            "databricks-dbfs-${PROJECT}-dev"
+
+          import_if_exists \
+            "module.gcp_networking.google_compute_network.databricks_vpc" \
+            "projects/${PROJECT}/global/networks/databricks-vpc-dev"
+
+          import_if_exists \
+            "module.gcp_networking.google_compute_subnetwork.databricks_subnet" \
+            "projects/${PROJECT}/regions/${REGION}/subnetworks/databricks-vpc-subnet-dev"
+
+          import_if_exists \
+            "module.gcp_networking.google_compute_router.databricks_router" \
+            "projects/${PROJECT}/regions/${REGION}/routers/databricks-router-dev"
+
+          import_if_exists \
+            "module.gcp_networking.google_compute_router_nat.databricks_nat" \
+            "${PROJECT}/${REGION}/databricks-router-dev/databricks-nat-dev"
+
+          import_if_exists \
+            "module.gcp_networking.google_compute_firewall.databricks_internal" \
+            "projects/${PROJECT}/global/firewalls/databricks-allow-internal-dev"
+
+          import_if_exists \
+            "module.gcp_networking.google_compute_firewall.databricks_control_plane" \
+            "projects/${PROJECT}/global/firewalls/databricks-allow-cp-dev"
+
+          echo "✅ Import step complete"
         env:
           TF_VAR_databricks_account_id: ${{ secrets.DATABRICKS_ACCOUNT_ID }}
           TF_VAR_gcp_project_id: ${{ secrets.GCP_PROJECT_ID }}
